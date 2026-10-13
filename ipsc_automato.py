@@ -10,7 +10,6 @@ from moviepy.config import change_settings
 # MoviePy / TextClip expects Image.ANTIALIAS; provide a fallback mapping to Resampling.LANCZOS.
 try:
     from PIL import Image as _PILImage
-n    
 except Exception:
     _PILImage = None
 
