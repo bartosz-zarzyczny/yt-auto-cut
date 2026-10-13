@@ -6,6 +6,20 @@ from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, Composit
 import moviepy.audio.fx.all as afx
 from moviepy.config import change_settings
 
+# Pillow compatibility: some Pillow versions removed Image.ANTIALIAS constant.
+# MoviePy / TextClip expects Image.ANTIALIAS; provide a fallback mapping to Resampling.LANCZOS.
+try:
+    from PIL import Image as _PILImage
+n    
+except Exception:
+    _PILImage = None
+
+if _PILImage is not None and not hasattr(_PILImage, 'ANTIALIAS'):
+    if hasattr(_PILImage, 'Resampling') and hasattr(_PILImage.Resampling, 'LANCZOS'):
+        _PILImage.ANTIALIAS = _PILImage.Resampling.LANCZOS
+    elif hasattr(_PILImage, 'LANCZOS'):
+        _PILImage.ANTIALIAS = _PILImage.LANCZOS
+
 # Ścieżka do ImageMagick (zostaw swoją, jeśli działała)
 change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
 
