@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Ignore user folders: Gotowe, Muzyka, Surowe
+Gotowe/
+Muzyka/
+Surowe/
