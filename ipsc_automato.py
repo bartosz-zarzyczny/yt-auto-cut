@@ -85,7 +85,7 @@ def czytaj_wyniki_z_pliku(sciezka_do_pliku):
     return wyniki
 
 
-def znajdz_czas_timera_od_tylu(video_clip, czas_z_tabeli):
+def wykryj_czas_timera(video_clip, czas_z_tabeli):
     """
     Wersja rozszerzona: najpierw próbuje dopasować wzorzec dźwiękowy timera (template matching)
     korzystając z wygładzonej otoczki sygnału. Jeśli brak dopasowania, używa poprzedniej
@@ -263,7 +263,7 @@ def uruchom_automatyzacje():
             video = VideoFileClip(sciezka_wej)
             
             # --- ZNALEZIENIE TIMERA METODĄ OSTATNIEGO STRZAŁU ---
-            start_timera = znajdz_czas_timera_od_tylu(video, czas_z_tabeli)
+            start_timera = wykryj_czas_timera(video, czas_z_tabeli)
             
             # Tniemy od 0.2s przed obliczonym timerem do 0.5s po ostatnim strzale
             start_ciecia = max(0, start_timera - 0.2)
