@@ -156,11 +156,11 @@ def uruchom_automatyzacje():
             # Napis wyrównany do dołu
             napis = napis.set_position(('center', 0.85), relative=True).set_duration(nowy_czas_trwania)
             
-                        # --- ZMIANA ROZDZIELCZOŚCI NA 1080x1920 (portrait) ---
-                        # Dopasowujemy przycięte wideo do zadanej rozdzielczości (szer. x wys.)
-                        przyciete_video = przyciete_video.resize(newsize=(1080, 1920))
-                        # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
-                        wideo_koncowe = CompositeVideoClip([przyciete_video, napis], size=(1080, 1920))
+            # --- ZMIANA ROZDZIELCZOŚCI NA 1080x1920 (portrait) ---
+            # Dopasowujemy przycięte wideo do zadanej rozdzielczości (szer. x wys.)
+            przyciete_video = przyciete_video.resize(newsize=(1080, 1920))
+            # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
+            wideo_koncowe = CompositeVideoClip([przyciete_video, napis], size=(1080, 1920))
             
             # --- RENDEROWANIE Z ZACHOWANIEM KOLORÓW I BEZ OBROTÓW ---
             print(f"Rozpoczynam renderowanie (NVENC)...")
