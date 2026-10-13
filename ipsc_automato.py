@@ -207,7 +207,30 @@ def znajdz_czas_timera_od_tylu(video_clip, czas_z_tabeli):
             break
 
     kalkulowany_timer = ostatni_strzal_czas - czas_z_tabeli
-    return max(0.0, kalkulowany_timer)
+    if kalkulowany_timer > 0.0:
+        return max(0.0, kalkulowany_timer)
+
+    # --- FALLBACK: spróbuj policzyć od końca pliku na podstawie ostatniej aktywności audio ---
+    try:
+        abs_mono = np.abs(mono)
+        if abs_mono.size > 0:
+            amp_thr = 0.05 * abs_mono.max()  # threshold 5% maksymalnej amplitudy
+            idxs = np.where(abs_mono >= amp_thr)[0]
+            if idxs.size > 0:
+                last_activity_time = idxs[-1] / float(analysis_sr)
+                kalkulowany_timer = last_activity_time - czas_z_tabeli
+                if kalkulowany_timer > 0.0:
+                    return max(0.0, kalkulowany_timer)
+    except Exception:
+        pass
+
+    # Ostateczny fallback: policz od końca pliku (może być niedokładne jeśli plik ma dużo zawartości po biegu)
+    try:
+        duration = float(video_clip.duration)
+        kalkulowany_timer = duration - czas_z_tabeli
+        return max(0.0, kalkulowany_timer)
+    except Exception:
+        return 0.0
 
 
 # ===================================================================
