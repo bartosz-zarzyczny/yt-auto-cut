@@ -22,6 +22,34 @@ if _PILImage is not None and not hasattr(_PILImage, 'ANTIALIAS'):
 # Ścieżka do ImageMagick (zostaw swoją, jeśli działała)
 change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
 
+# Ścieżka do pliku z przykładowym dźwiękiem timera (jeśli istnieje)
+TIMER_TEMPLATE_PATH = r"D:\Repo\yt-auto-cut\timer.mp4"
+
+def _load_timer_template(path, sr=4000):
+    """Wczytuje plik z timerem i zwraca wygładzoną otoczkę (envelope) oraz sampling rate.
+    Zwraca (envelope, sr) lub None gdy plik nie istnieje/nie można załadować."""
+    if not os.path.exists(path):
+        return None
+    try:
+        clip = AudioFileClip(path)
+        frames = list(clip.iter_frames(fps=sr))
+        clip.close()
+        if len(frames) == 0:
+            return None
+        arr = np.vstack(frames)
+        mono = arr.mean(axis=1) if arr.ndim > 1 else arr
+        env = np.abs(mono)
+        # Wygładzanie krótkim oknem (20ms) by skupić się na cechach tonalnych beepa
+        win = max(1, int(sr * 0.02))
+        kernel = np.ones(win, dtype=float) / win
+        env_smooth = np.convolve(env, kernel, mode='valid')
+        return (env_smooth, sr)
+    except Exception:
+        return None
+
+# Wczytaj wzorzec raz przy starcie (może być None)
+TIMER_TEMPLATE = _load_timer_template(TIMER_TEMPLATE_PATH)
+
 # ===================================================================
 # KONFIGURACJA ŚCIEŻEK
 # ===================================================================
@@ -59,44 +87,77 @@ def czytaj_wyniki_z_pliku(sciezka_do_pliku):
 
 def znajdz_czas_timera_od_tylu(video_clip, czas_z_tabeli):
     """
-    Nowa logika: Szuka ostatniego strzału i na jego podstawie wylicza timer.
+    Wersja rozszerzona: najpierw próbuje dopasować wzorzec dźwiękowy timera (template matching)
+    korzystając z wygładzonej otoczki sygnału. Jeśli brak dopasowania, używa poprzedniej
+    heurystyki opartej na RMS okienkowym.
     """
-    audio_clip = video_clip.audio
-    # Pobieramy całe audio do analizy
-    ramki_audio = list(audio_clip.iter_frames(fps=22050))
-    audio_array = np.vstack(ramki_audio)
-    
-    if len(audio_array.shape) > 1:
-        mono = audio_array.mean(axis=1)
-    else:
-        mono = audio_array
-        
-    okno = int(22050 * 0.1) # Badamy paczki po 100ms
+    # Parametry analizy
+    analysis_sr = 4000  # mniejsze SR dla przyspieszenia analizy i mniejszych tablic
+    try:
+        audio_clip = video_clip.audio
+        frames = list(audio_clip.iter_frames(fps=analysis_sr))
+    except Exception:
+        return 0.0
+
+    if len(frames) == 0:
+        return 0.0
+
+    audio_array = np.vstack(frames)
+    mono = audio_array.mean(axis=1) if audio_array.ndim > 1 else audio_array
+
+    # Envelope (abs) + krótkie wygładzenie (20ms)
+    env = np.abs(mono)
+    win = max(1, int(analysis_sr * 0.02))
+    kernel = np.ones(win, dtype=float) / win
+    env_smooth = np.convolve(env, kernel, mode='valid')
+
+    # --- Próba dopasowania wzorca timera ---
+    if TIMER_TEMPLATE is not None:
+        template_env, template_sr = TIMER_TEMPLATE
+        # Jeśli sampling rate wzorca różni się od analysis_sr, pomiń dopasowanie
+        if template_sr == analysis_sr and len(env_smooth) >= len(template_env):
+            try:
+                corr = np.convolve(env_smooth, template_env[::-1], mode='valid')
+                if corr.size > 0:
+                    peak = corr.max()
+                    if peak > 0:
+                        # Szukamy indeksów przekraczających prog (50% maks)
+                        thresh = 0.5 * peak
+                        matches = np.where(corr >= thresh)[0]
+                        if matches.size > 0:
+                            last_match_idx = matches[-1]
+                            detected_time = last_match_idx / float(analysis_sr)
+                            kalkulowany_timer = detected_time - czas_z_tabeli
+                            return max(0.0, kalkulowany_timer)
+            except Exception:
+                # jeśli dopasowanie wzorca zawiedzie, przejdź do heurystyki
+                pass
+
+    # --- Fallback: oryginalna heurystyka RMS okienkowa (przystosowana do analysis_sr) ---
+    okno = int(analysis_sr * 0.1)  # 100 ms
+    if okno <= 0:
+        okno = 1
     glosnosci = []
-    
-    # Skanowanie całego nagrania
     for i in range(0, len(mono), okno):
         fragment = mono[i:i+okno]
+        if fragment.size == 0:
+            continue
         rms = np.sqrt(np.mean(fragment**2))
-        glosnosci.append((i / 22050.0, rms))
-        
-    # Znajdujemy głośność najgłośniejszego wystrzału na nagraniu
+        glosnosci.append((i / float(analysis_sr), rms))
+
+    if not glosnosci:
+        return 0.0
+
     max_glosnosc = max([g[1] for g in glosnosci])
-    
-    # Ustawiamy próg na 40% maksymalnej głośności (bezpieczny próg dla strzału)
-    prog = max_glosnosc * 0.4 
-    
-    # Przeszukujemy listę OD KOŃCA, by znaleźć OSTATNI wystrzał
-    ostatni_strzal_czas = 0
+    prog = max_glosnosc * 0.4
+
+    ostatni_strzal_czas = 0.0
     for czas, rms in reversed(glosnosci):
         if rms >= prog:
             ostatni_strzal_czas = czas
             break
-            
-    # Obliczamy, gdzie musiał paść Timer! (Ostatni strzał MINUS czas przejazdu)
+
     kalkulowany_timer = ostatni_strzal_czas - czas_z_tabeli
-    
-    # Zabezpieczenie przed błędami
     return max(0.0, kalkulowany_timer)
 
 
