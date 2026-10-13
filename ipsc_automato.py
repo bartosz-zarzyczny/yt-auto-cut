@@ -111,23 +111,72 @@ def znajdz_czas_timera_od_tylu(video_clip, czas_z_tabeli):
     kernel = np.ones(win, dtype=float) / win
     env_smooth = np.convolve(env, kernel, mode='valid')
 
-    # --- Próba dopasowania wzorca timera ---
+    # --- Próba dopasowania wzorca timera z normalizowaną korelacją ---
     if TIMER_TEMPLATE is not None:
         template_env, template_sr = TIMER_TEMPLATE
         # Jeśli sampling rate wzorca różni się od analysis_sr, pomiń dopasowanie
         if template_sr == analysis_sr and len(env_smooth) >= len(template_env):
             try:
-                corr = np.convolve(env_smooth, template_env[::-1], mode='valid')
-                if corr.size > 0:
-                    peak = corr.max()
-                    if peak > 0:
-                        # Szukamy indeksów przekraczających prog (50% maks)
-                        thresh = 0.5 * peak
-                        matches = np.where(corr >= thresh)[0]
-                        if matches.size > 0:
-                            last_match_idx = matches[-1]
-                            detected_time = last_match_idx / float(analysis_sr)
-                            kalkulowany_timer = detected_time - czas_z_tabeli
+                # Zero-mean template and signal for normalized cross-correlation
+                tpl = template_env - np.mean(template_env)
+                sig = env_smooth - np.mean(env_smooth)
+                L = len(tpl)
+                # Raw cross-correlation via convolution
+                corr = np.convolve(sig, tpl[::-1], mode='valid')
+                # Normalization: sliding window norm of sig
+                sig_sq = sig * sig
+                window = np.ones(L, dtype=float)
+                sig_energy = np.convolve(sig_sq, window, mode='valid')
+                tpl_energy = np.sum(tpl * tpl)
+                denom = np.sqrt(np.maximum(sig_energy * tpl_energy, 1e-12))
+                normalized = corr / denom
+
+                if normalized.size > 0:
+                    peak = normalized.max()
+                    # Candidate threshold (tuneable): require reasonably high normalized correlation
+                    corr_thresh = 0.65
+                    if peak >= corr_thresh:
+                        candidate_idxs = np.where(normalized >= corr_thresh)[0]
+                        # Convert candidate indices to times
+                        candidate_times = candidate_idxs.astype(float) / float(analysis_sr)
+
+                        # Find short RMS peaks (20-50ms resolution) to associate with shots
+                        peak_win = max(1, int(analysis_sr * 0.02))
+                        hop = max(1, int(analysis_sr * 0.02))
+                        rms_times = []
+                        rms_vals = []
+                        for i in range(0, len(mono) - peak_win + 1, hop):
+                            frag = mono[i:i+peak_win]
+                            rms_val = np.sqrt(np.mean(frag*frag))
+                            rms_times.append(i / float(analysis_sr))
+                            rms_vals.append(rms_val)
+                        if len(rms_vals) > 0:
+                            rms_vals = np.array(rms_vals)
+                            rms_times = np.array(rms_times)
+                            max_rms = rms_vals.max()
+                        else:
+                            rms_vals = np.array([])
+                            rms_times = np.array([])
+                            max_rms = 0.0
+
+                        best_candidate = None
+                        best_score = -1.0
+                        for ct in candidate_times:
+                            predicted_shot = ct + czas_z_tabeli
+                            # Find nearest rms peak
+                            if rms_times.size > 0:
+                                idx = np.argmin(np.abs(rms_times - predicted_shot))
+                                delta = abs(rms_times[idx] - predicted_shot)
+                                # require that rms peak is reasonably large compared to max
+                                if max_rms > 0 and rms_vals[idx] >= 0.25 * max_rms and delta <= 0.6:
+                                    # Score favors higher corr and smaller delta
+                                    corr_val = normalized[int((predicted_shot - 0) * analysis_sr)] if int((predicted_shot - 0) * analysis_sr) < normalized.size else peak
+                                    score = corr_val - (delta / 0.6)
+                                    if score > best_score:
+                                        best_score = score
+                                        best_candidate = ct
+                        if best_candidate is not None:
+                            kalkulowany_timer = best_candidate - czas_z_tabeli
                             return max(0.0, kalkulowany_timer)
             except Exception:
                 # jeśli dopasowanie wzorca zawiedzie, przejdź do heurystyki
