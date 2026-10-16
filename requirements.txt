@@ -1,0 +1,5 @@
+moviepy<2.0.0
+decorator==4.4.2
+numpy
+librosa
+scipy

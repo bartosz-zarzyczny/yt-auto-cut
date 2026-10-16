@@ -1,0 +1,8 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "/^git add \\.gitignore; git commit -m 'Ignore Gotowe, Muzyka, Surowe folders' -m 'Co-authored-by: Copilot <223556219\\+Copilot@users\\.noreply\\.github\\.com>'$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
+}
