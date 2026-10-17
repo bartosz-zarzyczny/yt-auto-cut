@@ -1,6 +1,8 @@
+import argparse
 import os
 import re
 import random
+from pathlib import Path
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, CompositeAudioClip, AudioFileClip
 import moviepy.audio.fx.all as afx
 from moviepy.config import change_settings
@@ -9,6 +11,7 @@ from timer_trim import przytnij_wideo
 from dodatkowe_teksty import utworz_klipy_tekstowe
 from mapowanie_torow import przypisz_tory
 from ustawienia_systemu import KATALOG_PROJEKTU, znajdz_imagemagick, wybierz_czcionke, sprawdz_srodowisko
+from generuj_nazwy import generuj_tytul, przemianuj_plik
 
 # Pillow compatibility: some Pillow versions removed Image.ANTIALIAS constant.
 # MoviePy / TextClip expects Image.ANTIALIAS; provide a fallback mapping to Resampling.LANCZOS.
@@ -69,7 +72,7 @@ def czytaj_wyniki_z_pliku(sciezka_do_pliku):
 # GŁÓWNA LOGIKA
 # ===================================================================
 
-def uruchom_automatyzacje():
+def uruchom_automatyzacje(yt=False, publikuj=False):
     srodowisko_ok, kodek = sprawdz_srodowisko(_magick)
     if not srodowisko_ok:
         return
@@ -156,10 +159,46 @@ def uruchom_automatyzacje():
             
             video.close()
             wideo_koncowe.close()
+            sciezka_wyj = Path(sciezka_wyj)
+            tytul = generuj_tytul(sciezka_wyj)
+            sciezka_wyj = przemianuj_plik(sciezka_wyj, tytul)
+            print(f"Nadano nazwę: {sciezka_wyj.name}")
             print("Zakończono sukcesem!\n")
             
         except Exception as e:
             print(f"BŁĄD podczas przetwarzania: {str(e)}\n")
 
+    if yt:
+        from youtube_upload import main as uruchom_youtube
+
+        argumenty_youtube = [FOLDER_WYJSCIOWY]
+        if publikuj:
+            argumenty_youtube.append("--publish")
+        uruchom_youtube(argumenty_youtube)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Montuje nagrania IPSC, a opcjonalnie przygotowuje publikację YouTube.",
+        prefix_chars="-/",
+    )
+    parser.add_argument(
+        "--yt",
+        "/yt",
+        dest="yt",
+        action="store_true",
+        help="Po montażu uruchamia podgląd kolejki YouTube (bez wysyłania).",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Wysyła filmy do YouTube; wymaga jednocześnie opcji --yt lub /yt.",
+    )
+    args = parser.parse_args()
+    if args.publish and not args.yt:
+        parser.error("--publish wymaga również opcji --yt lub /yt.")
+    uruchom_automatyzacje(yt=args.yt, publikuj=args.publish)
+
+
 if __name__ == "__main__":
-    uruchom_automatyzacje()
+    main()
