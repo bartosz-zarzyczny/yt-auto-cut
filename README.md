@@ -14,6 +14,32 @@ Aby skrypt działał poprawnie, musisz zainstalować w systemie Windows następu
    * **BARDZO WAŻNE:** Podczas instalacji musisz zaznaczyć pole **"Install legacy utilities (e.g. convert)"**.
 3. Karta graficzna **NVIDIA** (np. RTX 4060) w celu obsługi szybkiego renderowania `h264_nvenc`.
 
+## 🍎 Konfiguracja pod macOS
+
+Projekt działa na macOS (kodek `h264_videotoolbox` lub `libx264`; NVIDIA nie jest potrzebna). Poniższe komendy wykonaj w Terminalu.
+
+1. **Homebrew** (jeśli go nie masz) — instrukcja na [brew.sh](https://brew.sh/).
+2. **Python, ImageMagick i FFmpeg:**
+   ```bash
+   brew install python imagemagick ffmpeg
+   ```
+3. **Środowisko wirtualne i biblioteki** (w folderze projektu):
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install -r requirements.txt
+   ```
+   Przy kolejnych uruchomieniach najpierw wykonaj `source .venv/bin/activate`.
+4. **Uruchomienie:**
+   ```bash
+   python ipsc_automato.py            # montaż + nazwy plików
+   python ipsc_automato.py --yt       # dodatkowo podgląd YouTube
+   ```
+   Opcja `/yt` działa tak samo, ale w zsh/bash lepiej używać `--yt` (ukośnik na początku bywa traktowany jak ścieżka).
+5. **YouTube:** konfiguracja OAuth jest identyczna jak na Windows (sekcja „Publikowanie Shorts na YouTube”). Plik `youtube_client_secret.json` zapisz w folderze projektu; logowanie otworzy się w domyślnej przeglądarce.
+
+Uwagi: napisy z wynikami używają systemowego Arial Bold lub Helvetica; jeśli ImageMagick nie jest wykrywany, sprawdź `which magick` (na Apple Silicon Homebrew instaluje w `/opt/homebrew/bin`). Brak uprawnień do folderów rozwiąż w **Ustawienia systemowe → Prywatność i ochrona**.
+
 ## 📦 Instalacja bibliotek Pythona
 
 Otwórz wiersz poleceń (CMD) w folderze, w którym znajduje się plik `ipsc_automato.py` oraz `requirements.txt`, a następnie uruchom komendę:
