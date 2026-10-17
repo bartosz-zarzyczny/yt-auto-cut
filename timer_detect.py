@@ -12,6 +12,8 @@ MIN_RAMEK = 22          # ok. 0,26 s ciągłego tonu (krótsze to zwykle tło)
 MIN_KONCENTRACJA = 0.25  # udział energii pasma skupiony wokół piku
 PERCENTYL_GLOSNOSCI = 90
 MAX_SKOK_HZ = 60
+MIN_KONCENTRACJA_SYGNALU = 0.85
+MAX_ODCHYLENIE_CZESTOTLIWOSCI_HZ = 25
 
 
 def _wyciagnij_audio(sciezka_wideo):
@@ -59,7 +61,11 @@ def znajdz_sygnaly_timera(sciezka_wideo):
         while j + 1 < n and aktywne[j + 1] and abs(f_pik[j + 1] - f_pik[j]) <= MAX_SKOK_HZ:
             j += 1
         if j - i + 1 >= MIN_RAMEK:
-            wyniki.append((i * HOP / SR, float(np.median(f_pik[i:j + 1]))))
+            czestotliwosci = f_pik[i:j + 1]
+            koncentracje = koncentracja[i:j + 1]
+            if (np.median(koncentracje) >= MIN_KONCENTRACJA_SYGNALU
+                    and np.std(czestotliwosci) <= MAX_ODCHYLENIE_CZESTOTLIWOSCI_HZ):
+                wyniki.append((i * HOP / SR, float(np.median(czestotliwosci))))
         i = j + 1
     return wyniki
 
@@ -74,14 +80,9 @@ def zglos_wykrycie_timera(sciezka_wideo):
 
     if not sygnaly:
         print("[TIMER] Nie wykryto sygnału timera.")
-    elif len(sygnaly) == 1:
+    else:
         t, f = sygnaly[0]
         print(f"[TIMER] Wykryto start timera: {t:.2f}s (~{f:.0f} Hz)")
-    else:
-        lista = ", ".join(f"{t:.2f}s (~{f:.0f} Hz)" for t, f in sygnaly)
-        print("!" * 70)
-        print(f"!!! UWAGA: WIELE WYKRYĆ TIMERA ({len(sygnaly)}) W JEDNYM PLIKU !!!")
-        print(f"!!! {lista}")
-        print("!!! Sprawdź ręcznie, który sygnał jest startowy.")
-        print("!" * 70)
-    return sygnaly
+        if len(sygnaly) > 1:
+            print(f"[TIMER] Pominięto {len(sygnaly) - 1} późniejszych sygnałów timera.")
+    return sygnaly[:1]

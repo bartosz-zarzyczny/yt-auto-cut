@@ -43,7 +43,7 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    ```
    Możesz je podmienić na dowolne własne ścieżki.
 
-   **Czcionka i kodek (automatycznie, `ustawienia_systemu.py`):** Windows używa `Arial-Bold`; macOS – Arial Bold/Helvetica; Linux – Liberation Sans Bold lub DejaVu Sans Bold; w ostateczności czcionki z folderu `Fonts`. Kodek: `h264_nvenc` (NVIDIA), na macOS `h264_videotoolbox`, w innym razie `libx264` (wolniejszy, ale działa wszędzie). Na macOS/Linuksie zainstaluj ImageMagick (`brew install imagemagick` / `sudo apt install imagemagick`).
+   **Czcionka i kodek (automatycznie, `ustawienia_systemu.py`):** Napisy z wynikami używają czcionki systemowej (Windows: `Arial-Bold`; pozostałe systemy: Arial Bold/Helvetica lub Liberation Sans/DejaVu Sans Bold, z czcionkami z folderu `Fonts` jako zapasowymi). Dodatkowe teksty u góry używają Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`. Kodek: `h264_nvenc` (NVIDIA), na macOS `h264_videotoolbox`, w innym razie `libx264` (wolniejszy, ale działa wszędzie). Na macOS/Linuksie zainstaluj ImageMagick (`brew install imagemagick` / `sudo apt install imagemagick`).
 
 3a. **Kolejność torów (`tory.txt`):**
    Obsługuje to moduł `mapowanie_torow.py`. Pliki z `FOLDER_WEJSCIOWY` są sortowane alfabetycznie, a **N-ta linia** pliku `tory.txt` to numer toru dla **N-tego pliku**. Przykład: jeśli plik jest drugi w sortowaniu, a druga linia w `tory.txt` to `1`, to jest to Tor 1 (i do niego zostaną dopasowane wyniki ze `wyniki.txt`).

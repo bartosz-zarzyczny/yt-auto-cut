@@ -1,4 +1,4 @@
-	#	%	Stg Pts	Pts	HF	Time	Div	Class	Cats	PF	Mem #	A	C	D	M	NPM	NS	Proc	Apen
+#	%	Stg Pts	Pts	HF	Time	Div	Class	Cats	PF	Mem #	A	C	D	M	NPM	NS	Proc	Apen
 Stage
 	
 	
@@ -39,12 +39,13 @@ NS
 Proc
 	
 Apen
-Stage 1 Stage 1		10	66.01%	52.8044	70	3.6900	18.97	Standard Manual		Regular	MAJOR		16					1		
-Stage 2 Stage 2		9	73.79%	59.0340	80	3.8259	20.91	Standard Manual		Regular	MAJOR		16							
-Stage 3 Stage 3		6	71.47%	100.0630	140	4.9002	28.57	Standard Manual		Regular	MAJOR		28							
-Stage 4 Stage 4		11	69.02%	27.6096	40	3.9841	10.04	Standard Manual		Regular	MAJOR		8							
-Stage 5 Stage 5		15	58.45%	46.7574	80	4.0343	19.83	Standard Manual		Regular	MAJOR		16							
-Stage 6 Stage 6		7	77.45%	30.9790	40	3.4965	11.44	Standard Manual		Regular	MAJOR		8							
-Stage 7 Stage 7		9	76.68%	30.6737	40	2.3433	17.07	Standard Manual		Regular	MAJOR		8							
-Stage 8 Stage 8		12	67.21%	26.8841	40	3.6232	11.04	Standard Manual		Regular	MAJOR		8							
-Stage
+Stage 1 Stage 1		22	56.50%	22.6008	40	2.0161	19.84	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 2 Stage 2		11	69.23%	27.6908	40	1.8966	21.09	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 3 Stage 3		19	55.00%	43.9984	80	3.1860	25.11	Standard Manual		Regular	MAJOR	L-47895	16							
+Stage 4 Stage 4		15	67.36%	53.8867	80	3.4587	23.13	Standard Manual		Regular	MAJOR	L-47895	16							
+Stage 5 Stage 5		7	74.56%	104.3869	140	3.6601	38.25	Standard Manual		Regular	MAJOR	L-47895	28							
+Stage 6 Stage 6		13	67.89%	27.1563	40	3.7665	10.62	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 7 Stage 7		8	70.39%	59.8285	85	4.6271	18.37	Standard Manual		Regular	MAJOR	L-47895	17							
+Stage 8 Stage 8		7	74.06%	29.6221	40	2.9070	13.76	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 9 Stage 9		8	63.20%	75.8405	110	3.4821	31.59	Standard Manual		Regular	MAJOR	L-47895	24					1		
+Stage 10 Stage 10		9	73.90%	77.5915	105	3.9608	26.51	Standard Manual		Regular	MAJOR	L-47895	21	
