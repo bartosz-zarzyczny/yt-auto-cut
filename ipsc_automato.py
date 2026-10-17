@@ -7,6 +7,8 @@ from moviepy.config import change_settings
 from timer_detect import zglos_wykrycie_timera
 from timer_trim import przytnij_wideo
 from dodatkowe_teksty import utworz_klipy_tekstowe
+from mapowanie_torow import przypisz_tory
+from ustawienia_systemu import KATALOG_PROJEKTU, znajdz_imagemagick, wybierz_czcionke, sprawdz_srodowisko
 
 # Pillow compatibility: some Pillow versions removed Image.ANTIALIAS constant.
 # MoviePy / TextClip expects Image.ANTIALIAS; provide a fallback mapping to Resampling.LANCZOS.
@@ -22,16 +24,19 @@ if _PILImage is not None and not hasattr(_PILImage, 'ANTIALIAS'):
         _PILImage.ANTIALIAS = _PILImage.LANCZOS
 
 # Ścieżka do ImageMagick (zostaw swoją, jeśli działała)
-change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
+_magick = znajdz_imagemagick(r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe")
+if _magick:
+    change_settings({"IMAGEMAGICK_BINARY": _magick})
 
 # ===================================================================
 # KONFIGURACJA ŚCIEŻEK
 # ===================================================================
-FOLDER_WEJSCIOWY = r"D:\Repo\yt-auto-cut\Surowe"      
-FOLDER_WYJSCIOWY = r"D:\Repo\yt-auto-cut\Gotowe"      
-FOLDER_MUZYKI = r"D:\Repo\yt-auto-cut\Muzyka"         
-PLIK_Z_WYNIKAMI = r"D:\Repo\yt-auto-cut\wyniki.txt"   
-PLIK_Z_TEKSTAMI = r"D:\Repo\yt-auto-cut\dodatkowe_teksty.txt"
+FOLDER_WEJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Surowe")
+FOLDER_WYJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Gotowe")
+FOLDER_MUZYKI = os.path.join(KATALOG_PROJEKTU, "Muzyka")
+PLIK_Z_WYNIKAMI = os.path.join(KATALOG_PROJEKTU, "wyniki.txt")
+PLIK_Z_TEKSTAMI = os.path.join(KATALOG_PROJEKTU, "dodatkowe_teksty.txt")
+PLIK_Z_TORAMI = os.path.join(KATALOG_PROJEKTU, "tory.txt")
 
 # ===================================================================
 # FUNKCJE POMOCNICZE
@@ -65,6 +70,10 @@ def czytaj_wyniki_z_pliku(sciezka_do_pliku):
 # ===================================================================
 
 def uruchom_automatyzacje():
+    srodowisko_ok, kodek = sprawdz_srodowisko(_magick)
+    if not srodowisko_ok:
+        return
+
     os.makedirs(FOLDER_WYJSCIOWY, exist_ok=True)
     
     dane_torow = czytaj_wyniki_z_pliku(PLIK_Z_WYNIKAMI)
@@ -76,8 +85,7 @@ def uruchom_automatyzacje():
     ]
     wideo_pliki.sort() 
     
-    for index, nazwa_pliku in enumerate(wideo_pliki):
-        nr_toru = str(index + 1)
+    for nazwa_pliku, nr_toru in przypisz_tory(wideo_pliki, PLIK_Z_TORAMI):
         print(f"\n>>> Przetwarzanie: {nazwa_pliku} jako TOR {nr_toru}")
         
         if nr_toru not in dane_torow:
@@ -121,7 +129,7 @@ def uruchom_automatyzacje():
                                  f"Czas: {dane['czas']}s | HF: {dane['hf']} | Pkt: {dane['punkty']}")
             
             napis = TextClip(tekst_wyswietlany, fontsize=55, color='white', 
-                             font='Arial-Bold', stroke_color='black', stroke_width=2.5, align='center')
+                             font=wybierz_czcionke(), stroke_color='black', stroke_width=2.5, align='center')
             
             # Napis wyrównany do dołu
             napis = napis.set_position(('center', 0.85), relative=True).set_duration(nowy_czas_trwania)
@@ -134,11 +142,11 @@ def uruchom_automatyzacje():
             wideo_koncowe = CompositeVideoClip([video, napis] + teksty_gorne, size=(1080, 1920)).set_fps(30)
             
             # --- RENDEROWANIE Z ZACHOWANIEM KOLORÓW I BEZ OBROTÓW ---
-            print(f"Rozpoczynam renderowanie (NVENC)...")
+            print(f"Rozpoczynam renderowanie ({kodek})...")
             wideo_koncowe.write_videofile(
                 sciezka_wyj, 
                 fps=30, 
-                codec="h264_nvenc", 
+                codec=kodek, 
                 audio_codec="aac",
                 bitrate="8000k",    
                 preset="fast",

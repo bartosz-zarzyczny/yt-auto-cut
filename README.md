@@ -28,21 +28,31 @@ pip install -r requirements.txt
 
 Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub dowolnym edytorze kodu i dostosuj następujące ustawienia na samej górze pliku:
 
-1. **Ścieżka do ImageMagick:**
-   Sprawdź w swoim systemie (zazwyczaj w `C:\Program Files\`), jak dokładnie nazywa się folder ImageMagick i podmień ścieżkę w poniższej linijce:
-   ```python
-   change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.1-Q16-HDRI\magick.exe"})
-   ```
+1. **ImageMagick:**
+   Skrypt sam szuka `magick`/`convert` w `PATH` (Windows: dodatkowo w `C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\`). Jeśli masz inną wersję, zmień ścieżkę domyślną w wywołaniu `znajdz_imagemagick(...)` na górze `ipsc_automato.py`.
 
 2. **Ścieżki do folderów roboczych:**
-   Możesz stworzyć własną strukturę folderów, np. na dysku C:
+   Domyślnie są **względne** – liczone od folderu ze skryptem (`KATALOG_PROJEKTU`), więc projekt działa na Windows, macOS i Linuksie po skopiowaniu w dowolne miejsce:
    ```python
-   FOLDER_WEJSCIOWY = r"C:\IPSC\Surowe"      # Tu wrzucasz oryginalne nagrania (mp4/mov)
-   FOLDER_WYJSCIOWY = r"C:\IPSC\Gotowe"      # Tu pojawią się gotowe rolki
-   FOLDER_MUZYKI = r"C:\IPSC\Muzyka"         # Tu wrzuć swoje ulubione podkłady muzyczne (mp3)
-   PLIK_Z_WYNIKAMI = r"C:\IPSC\wyniki.txt"   # Plik tekstowy ze skopiowanymi wynikami zawodów
-   PLIK_Z_TEKSTAMI = r"C:\IPSC\dodatkowe_teksty.txt"   # Teksty wyświetlane u góry wideo
+   FOLDER_WEJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Surowe")      # Tu wrzucasz oryginalne nagrania (mp4/mov)
+   FOLDER_WYJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Gotowe")      # Tu pojawią się gotowe rolki
+   FOLDER_MUZYKI = os.path.join(KATALOG_PROJEKTU, "Muzyka")         # Podkłady muzyczne (mp3)
+   PLIK_Z_WYNIKAMI = os.path.join(KATALOG_PROJEKTU, "wyniki.txt")   # Wyniki zawodów
+   PLIK_Z_TEKSTAMI = os.path.join(KATALOG_PROJEKTU, "dodatkowe_teksty.txt")   # Teksty u góry wideo
+   PLIK_Z_TORAMI = os.path.join(KATALOG_PROJEKTU, "tory.txt")       # Kolejność torów
    ```
+   Możesz je podmienić na dowolne własne ścieżki.
+
+   **Czcionka i kodek (automatycznie, `ustawienia_systemu.py`):** Windows używa `Arial-Bold`; macOS – Arial Bold/Helvetica; Linux – Liberation Sans Bold lub DejaVu Sans Bold; w ostateczności czcionki z folderu `Fonts`. Kodek: `h264_nvenc` (NVIDIA), na macOS `h264_videotoolbox`, w innym razie `libx264` (wolniejszy, ale działa wszędzie). Na macOS/Linuksie zainstaluj ImageMagick (`brew install imagemagick` / `sudo apt install imagemagick`).
+
+3a. **Kolejność torów (`tory.txt`):**
+   Obsługuje to moduł `mapowanie_torow.py`. Pliki z `FOLDER_WEJSCIOWY` są sortowane alfabetycznie, a **N-ta linia** pliku `tory.txt` to numer toru dla **N-tego pliku**. Przykład: jeśli plik jest drugi w sortowaniu, a druga linia w `tory.txt` to `1`, to jest to Tor 1 (i do niego zostaną dopasowane wyniki ze `wyniki.txt`).
+   ```text
+   2
+   1
+   3
+   ```
+   Jeśli pliku `tory.txt` brakuje lub ma za mało linii, numer toru wynika z pozycji w sortowaniu (1, 2, 3...).
 
 3. **Dodatkowe teksty u góry wideo (`dodatkowe_teksty.txt`):**
    Każdy tekst wpisz w nawiasach kwadratowych, np. `[Klub ZSD]`. Plik może zawierać zero lub kilka wpisów, ale **maksymalnie 5** (kolejne są ignorowane).
@@ -53,7 +63,7 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
 ## 🚀 Jak używać skryptu?
 
 1. **Przygotuj pliki wideo:** Po zawodach zrzuć nagrania z telefonu do `FOLDER_WEJSCIOWY`. 
-   * *Skrypt posortuje je chronologicznie po nazwie (dacie modyfikacji/utworzenia), przypisując najstarszy plik jako Tor 1, kolejny jako Tor 2, itd.*
+   * *Skrypt sortuje pliki alfabetycznie po nazwie, a numer toru każdego z nich bierze z odpowiedniej linii w `tory.txt` (patrz punkt 3a). Bez `tory.txt` kolejne pliki to Tor 1, 2, 3, itd.*
 2. **Przygotuj podkłady:** Upewnij się, że w `FOLDER_MUZYKI` masz chociaż jeden plik `.mp3`. Skrypt losuje muzykę dla każdego toru.
 3. **Wklej wyniki:** Skopiuj swoje wyniki z PractiScore (tabelę zawierającą np. `%`, `Czas`, `HF`, `Punkty`) i wklej je bez formatowania do pliku `wyniki.txt`.
 4. **Uruchom skrypt:**
