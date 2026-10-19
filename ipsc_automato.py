@@ -88,7 +88,7 @@ def uruchom_automatyzacje(yt=False, publikuj=False):
     ]
     wideo_pliki.sort() 
     
-    for nazwa_pliku, nr_toru in przypisz_tory(wideo_pliki, PLIK_Z_TORAMI):
+    for nazwa_pliku, nr_toru, rozdzielczosc in przypisz_tory(wideo_pliki, PLIK_Z_TORAMI):
         print(f"\n>>> Przetwarzanie: {nazwa_pliku} jako TOR {nr_toru}")
         
         if nr_toru not in dane_torow:
@@ -137,12 +137,11 @@ def uruchom_automatyzacje(yt=False, publikuj=False):
             # Napis wyrównany do dołu
             napis = napis.set_position(('center', 0.85), relative=True).set_duration(nowy_czas_trwania)
             
-            # --- ZMIANA ROZDZIELCZOŚCI NA 1080x1920 (portrait) ---
-            # Dopasowujemy wideo do zadanej rozdzielczości (szer. x wys.)
-            video = video.resize(newsize=(1080, 1920))
+            # --- ZMIANA ROZDZIELCZOŚCI (H = 1920x1080, V/domyślnie = 1080x1920) ---
+            video = video.resize(newsize=rozdzielczosc)
             # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
             teksty_gorne = utworz_klipy_tekstowe(PLIK_Z_TEKSTAMI, nowy_czas_trwania)
-            wideo_koncowe = CompositeVideoClip([video, napis] + teksty_gorne, size=(1080, 1920)).set_fps(30)
+            wideo_koncowe = CompositeVideoClip([video, napis] + teksty_gorne, size=rozdzielczosc).set_fps(30)
             
             # --- RENDEROWANIE Z ZACHOWANIEM KOLORÓW I BEZ OBROTÓW ---
             print(f"Rozpoczynam renderowanie ({kodek})...")
