@@ -1,4 +1,4 @@
-	#	%	Stg Pts	Pts	HF	Time	Div	Class	Cats	PF	Mem #	A	C	D	M	NPM	NS	Proc	Apen
+#	%	Stg Pts	Pts	HF	Time	Div	Class	Cats	PF	Mem #	A	C	D	M	NPM	NS	Proc	Apen
 Stage
 	
 	
@@ -39,13 +39,13 @@ NS
 Proc
 	
 Apen
-Stage 1 Tor 1		9	65.20%	26.0791	40	2.5924	15.43	Standard Manual		Regular	MAJOR		8							
-Stage 2 Tor 2		6	61.06%	48.8515	80	3.7348	21.42	Standard Manual		Regular	MAJOR		16							
-Stage 3 Tor 3		6	73.84%	103.3746	140	3.8472	36.39	Standard Manual		Regular	MAJOR		28							
-Stage 4 Tor 4		9	69.17%	55.3376	80	3.3970	23.55	Standard Manual		Regular	MAJOR		16							
-Stage 5 Tor 5		7	68.26%	40.9556	60	5.1195	11.72	Standard Manual		Regular	MAJOR		12							
-Stage 6 Tor 6		7	69.20%	51.9006	75	3.6550	20.52	Standard Manual		Regular	MAJOR		15							
-Stage 7 Tor 7		6	63.55%	50.8411	80	4.6729	17.12	Standard Manual		Regular	MAJOR		16							
-Stage 8 Tor 8		7	70.56%	56.4492	80	4.0465	19.77	Standard Manual		Regular	MAJOR		16							
-Stage 9 Tor 9		23	38.90%	15.5603	20	2.1552	9.28	Standard Manual		Regular	MAJOR		8					2		
-Stage 10 Stage 10		5	66.81%	53.4481	80	4.3034	18.59	Standard Manual		Regular	MAJOR		16							
+Stage 1 Stage 1		22	56.50%	22.6008	40	2.0161	19.84	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 2 Stage 2		11	69.23%	27.6908	40	1.8966	21.09	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 3 Stage 3		19	55.00%	43.9984	80	3.1860	25.11	Standard Manual		Regular	MAJOR	L-47895	16							
+Stage 4 Stage 4		15	67.36%	53.8867	80	3.4587	23.13	Standard Manual		Regular	MAJOR	L-47895	16							
+Stage 5 Stage 5		7	74.56%	104.3869	140	3.6601	38.25	Standard Manual		Regular	MAJOR	L-47895	28							
+Stage 6 Stage 6		13	67.89%	27.1563	40	3.7665	10.62	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 7 Stage 7		8	70.39%	59.8285	85	4.6271	18.37	Standard Manual		Regular	MAJOR	L-47895	17							
+Stage 8 Stage 8		7	74.06%	29.6221	40	2.9070	13.76	Standard Manual		Regular	MAJOR	L-47895	8							
+Stage 9 Stage 9		8	63.20%	75.8405	110	3.4821	31.59	Standard Manual		Regular	MAJOR	L-47895	24					1		
+Stage 10 Stage 10		9	73.90%	77.5915	105	3.9608	26.51	Standard Manual		Regular	MAJOR	L-47895	21	
