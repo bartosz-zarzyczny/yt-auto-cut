@@ -1,4 +1,5 @@
-#	%	Stg Pts	Pts	HF	Time	Div	Class	Cats	PF	Mem #	A	C	D	M	NPM	NS	Proc	Apen
+Search:
+Stage		#	%	Stg Pts	Pts	HF	Time	Div	Class	Cats	PF	Mem #	A	C	D	M	NPM	NS	Proc	Apen
 Stage
 	
 	
@@ -39,13 +40,13 @@ NS
 Proc
 	
 Apen
-Stage 1 Stage 1		22	56.50%	22.6008	40	2.0161	19.84	Standard Manual		Regular	MAJOR	L-47895	8							
-Stage 2 Stage 2		11	69.23%	27.6908	40	1.8966	21.09	Standard Manual		Regular	MAJOR	L-47895	8							
-Stage 3 Stage 3		19	55.00%	43.9984	80	3.1860	25.11	Standard Manual		Regular	MAJOR	L-47895	16							
-Stage 4 Stage 4		15	67.36%	53.8867	80	3.4587	23.13	Standard Manual		Regular	MAJOR	L-47895	16							
-Stage 5 Stage 5		7	74.56%	104.3869	140	3.6601	38.25	Standard Manual		Regular	MAJOR	L-47895	28							
-Stage 6 Stage 6		13	67.89%	27.1563	40	3.7665	10.62	Standard Manual		Regular	MAJOR	L-47895	8							
-Stage 7 Stage 7		8	70.39%	59.8285	85	4.6271	18.37	Standard Manual		Regular	MAJOR	L-47895	17							
-Stage 8 Stage 8		7	74.06%	29.6221	40	2.9070	13.76	Standard Manual		Regular	MAJOR	L-47895	8							
-Stage 9 Stage 9		8	63.20%	75.8405	110	3.4821	31.59	Standard Manual		Regular	MAJOR	L-47895	24					1		
-Stage 10 Stage 10		9	73.90%	77.5915	105	3.9608	26.51	Standard Manual		Regular	MAJOR	L-47895	21	
+Stage 1 Tor 1		4	78.94%	31.5774	40	2.8551	14.01	Standard		Regular	MAJOR		8							
+Stage 2 Tor 2		3	90.89%	72.7111	80	4.4444	18.00	Standard		Regular	MAJOR		16							
+Stage 3 Tor 3		8	86.25%	120.7452	140	4.2411	33.01	Standard		Regular	MAJOR		28							
+Stage 4 Tor 4		12	62.24%	49.7949	80	3.2167	24.87	Standard		Regular	MAJOR		16							
+Stage 5 Tor 5		8	80.40%	48.2406	59	5.0514	11.68	Standard		Regular	MAJOR		11	1						
+Stage 6 Tor 6		2	97.63%	73.2230	75	4.5565	16.46	Standard		Regular	MAJOR		15							
+Stage 7 Tor 7		5	84.62%	67.6923	80	5.3981	14.82	Standard		Regular	MAJOR		16							
+Stage 8 Tor 8		3	95.57%	76.4566	80	4.9906	16.03	Standard		Regular	MAJOR		16							
+Stage 9 Tor 9		17	59.03%	23.6111	30	3.0864	9.72	Standard		Regular	MAJOR		8					1		
+Stage 10 Stage 10		10	64.33%	51.4657	80	3.7106	21.56	Standard		Regular	MAJOR		16							
