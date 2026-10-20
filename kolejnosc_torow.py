@@ -4,9 +4,9 @@ ROZDZIELCZOSC_DOMYSLNA = (1080, 1920)
 ROZDZIELCZOSCI = {"H": (1920, 1080), "V": (1080, 1920)}
 
 
-def czytaj_kolejnosc_torow(sciezka_do_pliku):
-    """Zwraca listę (nr_toru, (szer, wys)) w kolejności z tory.txt.
-    Format linii: "numer" lub "numer;H" / "numer;V". Domyślnie 1080x1920."""
+def czytaj_kolejnosc_torow(sciezka_do_pliku, domyslna=ROZDZIELCZOSC_DOMYSLNA):
+    """Zwraca listę (nr_toru, (szer, wys)) w kolejności z mapowanie_torow.txt.
+    Format linii: "numer" lub "numer;H" / "numer;V". Bez litery używana jest rozdzielczość `domyslna`."""
     if not os.path.exists(sciezka_do_pliku):
         print(f"Brak pliku z kolejnością torów: {sciezka_do_pliku}")
         return []
@@ -18,6 +18,6 @@ def czytaj_kolejnosc_torow(sciezka_do_pliku):
             if not linia:
                 continue
             nr_toru, _, orientacja = linia.partition(";")
-            rozdzielczosc = ROZDZIELCZOSCI.get(orientacja.strip().upper(), ROZDZIELCZOSC_DOMYSLNA)
+            rozdzielczosc = ROZDZIELCZOSCI.get(orientacja.strip().upper(), domyslna)
             wynik.append((nr_toru.strip(), rozdzielczosc))
     return wynik
