@@ -6,6 +6,8 @@ import sys
 
 from moviepy.config import get_setting
 
+from sprawdzanie_systemu import kodek_dziala, kodeki_sprzetowe, OPISY_KODEKOW, preset_dla_kodeku  # noqa: F401
+
 KATALOG_PROJEKTU = os.path.dirname(os.path.abspath(__file__))
 
 # Windows: nazwa fontu znana ImageMagick. Pozostałe systemy: pliki czcionek zbliżonych do Arial Bold.
@@ -50,22 +52,12 @@ def znajdz_imagemagick(domyslna_windows=None):
 
 
 def _kodek_dziala(kodek):
-    # Próbne kodowanie z tymi samymi opcjami, których używa MoviePy (w tym -preset)
-    cmd = [get_setting("FFMPEG_BINARY"), "-v", "error", "-f", "lavfi",
-           "-i", "color=c=black:s=256x256:d=0.2", "-c:v", kodek,
-           "-preset", "fast", "-pix_fmt", "yuv420p", "-f", "null", "-"]
-    try:
-        return subprocess.run(cmd, capture_output=True, timeout=30).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+    return kodek_dziala(get_setting("FFMPEG_BINARY"), kodek)
 
 
 def wybierz_kodek():
-    """Pierwszy działający kodek: NVENC (NVIDIA), VideoToolbox (macOS), libx264 (zawsze)."""
-    kandydaci = ["h264_nvenc"]
-    if platform.system() == "Darwin":
-        kandydaci.append("h264_videotoolbox")
-    for kodek in kandydaci:
+    """Pierwszy działający kodek: NVENC (NVIDIA), AMF (AMD), QSV (Intel), VideoToolbox (macOS), libx264 (zawsze)."""
+    for kodek in kodeki_sprzetowe():
         if _kodek_dziala(kodek):
             return kodek
     return "libx264"
@@ -103,26 +95,33 @@ def instrukcja_ffmpeg():
     return "Zainstaluj FFmpeg z libx264: sudo apt install ffmpeg"
 
 
-def sprawdz_srodowisko(sciezka_magick):
+def sprawdz_srodowisko(sciezka_magick, log_callback=None):
     """Wypisuje kolorowe komunikaty. Zwraca (czy_mozna_kontynuowac, kodek)."""
     ok = True
 
+    def informuj(tekst, kolor=None):
+        print(_kolor(tekst, kolor) if kolor else tekst)
+        if log_callback:
+            log_callback(tekst)
+
     if not sciezka_magick:
         ok = False
-        print(_kolor("BŁĄD: Nie znaleziono programu ImageMagick (potrzebny do napisów).", CZERWONY))
-        print(_kolor("  Co zrobić: " + instrukcja_imagemagick(), CZERWONY))
-        print(_kolor("  Potem uruchom skrypt ponownie.", CZERWONY))
+        informuj("BŁĄD: Nie znaleziono programu ImageMagick (potrzebny do napisów).", CZERWONY)
+        informuj("  Co zrobić: " + instrukcja_imagemagick(), CZERWONY)
+        informuj("  Potem uruchom skrypt ponownie.", CZERWONY)
 
     kodek = wybierz_kodek()
     if kodek == "libx264" and not _kodek_dziala("libx264"):
         ok = False
-        print(_kolor("BŁĄD: FFmpeg nie ma działającego kodeka wideo (libx264).", CZERWONY))
-        print(_kolor("  Co zrobić: " + instrukcja_ffmpeg(), CZERWONY))
+        informuj("BŁĄD: FFmpeg nie ma działającego kodeka wideo (libx264).", CZERWONY)
+        informuj("  Co zrobić: " + instrukcja_ffmpeg(), CZERWONY)
     elif kodek == "libx264":
-        print(_kolor("UWAGA: Brak sprzętowego kodeka (NVENC/VideoToolbox) - użyję libx264. "
-                     "Renderowanie będzie wolniejsze.", ZOLTY))
-        print(_kolor("  Szybciej: karta NVIDIA i aktualne sterowniki lub FFmpeg z obsługą h264_nvenc.", ZOLTY))
+        informuj("UWAGA: Brak działającego kodeka sprzętowego (NVIDIA NVENC, AMD AMF, Intel QSV, "
+                 "Apple VideoToolbox) - użyję libx264 (procesor). Renderowanie będzie wolniejsze, ale działa.",
+                 ZOLTY)
+        informuj("  Szybciej: aktualne sterowniki karty graficznej i FFmpeg z obsługą jej kodeka "
+                 "(pełna wersja ze strony gyan.dev).", ZOLTY)
     else:
-        print(_kolor(f"Kodek wideo: {kodek}", ZIELONY))
+        informuj(f"Kodek wideo: {kodek} ({OPISY_KODEKOW.get(kodek, kodek)})", ZIELONY)
 
     return ok, kodek

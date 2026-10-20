@@ -1,7 +1,10 @@
 import subprocess
+from threading import Event
+from typing import Callable, Optional
 
 import numpy as np
 from scipy.signal import stft
+from video_cancellation import GenerationCancelled
 
 SR = 44100
 N_FFT = 2048
@@ -16,21 +19,45 @@ MIN_KONCENTRACJA_SYGNALU = 0.85
 MAX_ODCHYLENIE_CZESTOTLIWOSCI_HZ = 25
 
 
-def _wyciagnij_audio(sciezka_wideo):
+def _wyciagnij_audio(sciezka_wideo, cancel_event: Optional[Event] = None):
     import imageio_ffmpeg
     cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", sciezka_wideo,
            "-vn", "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"]
-    surowe = subprocess.run(cmd, stdout=subprocess.PIPE, check=True).stdout
+    proces = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    while True:
+        try:
+            surowe, blad = proces.communicate(timeout=0.2)
+            break
+        except subprocess.TimeoutExpired:
+            if cancel_event and cancel_event.is_set():
+                if proces.poll() is None:
+                    proces.terminate()
+                    try:
+                        proces.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proces.kill()
+                        proces.communicate()
+                raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
+    if cancel_event and cancel_event.is_set():
+        raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
+    if proces.returncode:
+        raise subprocess.CalledProcessError(
+            proces.returncode, cmd, output=surowe, stderr=blad
+        )
     return np.frombuffer(surowe, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def znajdz_sygnaly_timera(sciezka_wideo):
+def znajdz_sygnaly_timera(sciezka_wideo, cancel_event: Optional[Event] = None):
     """Zwraca listę (czas_s, częstotliwość_Hz) wykrytych sygnałów timera."""
-    y = _wyciagnij_audio(sciezka_wideo)
+    if cancel_event and cancel_event.is_set():
+        raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
+    y = _wyciagnij_audio(sciezka_wideo, cancel_event)
     if len(y) < N_FFT:
         return []
 
     freqs, _, Z = stft(y, fs=SR, nperseg=N_FFT, noverlap=N_FFT - HOP)
+    if cancel_event and cancel_event.is_set():
+        raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
     S = np.abs(Z)
     maska = (freqs >= PASMO_MIN) & (freqs <= PASMO_MAX)
     pasmo = S[maska, :]
@@ -70,19 +97,30 @@ def znajdz_sygnaly_timera(sciezka_wideo):
     return wyniki
 
 
-def zglos_wykrycie_timera(sciezka_wideo):
+def zglos_wykrycie_timera(
+    sciezka_wideo,
+    log_callback: Optional[Callable[[str], None]] = None,
+    cancel_event: Optional[Event] = None,
+):
     """Wypisuje wynik wykrywania na konsoli (bez przycinania). Zwraca listę wykryć."""
+    def raportuj(tekst):
+        print(tekst)
+        if log_callback:
+            log_callback(tekst)
+
     try:
-        sygnaly = znajdz_sygnaly_timera(sciezka_wideo)
+        sygnaly = znajdz_sygnaly_timera(sciezka_wideo, cancel_event)
+    except GenerationCancelled:
+        raise
     except Exception as e:
-        print(f"[TIMER] Nie udało się przeanalizować dźwięku: {e}")
+        raportuj(f"[TIMER] Nie udało się przeanalizować dźwięku: {e}")
         return []
 
     if not sygnaly:
-        print("[TIMER] Nie wykryto sygnału timera.")
+        raportuj("[TIMER] Nie wykryto sygnału timera.")
     else:
         t, f = sygnaly[0]
-        print(f"[TIMER] Wykryto start timera: {t:.2f}s (~{f:.0f} Hz)")
+        raportuj(f"[TIMER] Wykryto start timera: {t:.2f}s (~{f:.0f} Hz)")
         if len(sygnaly) > 1:
-            print(f"[TIMER] Pominięto {len(sygnaly) - 1} późniejszych sygnałów timera.")
+            raportuj(f"[TIMER] Pominięto {len(sygnaly) - 1} późniejszych sygnałów timera.")
     return sygnaly[:1]

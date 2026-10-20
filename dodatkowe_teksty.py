@@ -1,5 +1,6 @@
 import re
 import os
+from typing import Callable, Optional
 
 from moviepy.editor import TextClip
 
@@ -41,12 +42,19 @@ def planuj_czasy(liczba_tekstow, dlugosc_filmu):
     return [(START_OFFSET + i * slot + margines, czas) for i in range(n)]
 
 
-def utworz_klipy_tekstowe(sciezka, dlugosc_filmu):
+def utworz_klipy_tekstowe(
+    sciezka, dlugosc_filmu, log_callback: Optional[Callable[[str], None]] = None
+):
     """Zwraca listę TextClip do nałożenia w górnej części wideo."""
+    def raportuj(tekst):
+        print(tekst)
+        if log_callback:
+            log_callback(tekst)
+
     teksty = czytaj_teksty(sciezka)
     plan = planuj_czasy(len(teksty), dlugosc_filmu)
     if len(plan) < len(teksty):
-        print(f"[TEKSTY] Film za krótki - użyto {len(plan)} z {len(teksty)} tekstów.")
+        raportuj(f"[TEKSTY] Film za krótki - użyto {len(plan)} z {len(teksty)} tekstów.")
     klipy = []
     for tekst, (start, czas) in zip(teksty, plan):
         klip = TextClip(tekst, fontsize=60, color=KOLOR, font=CZCIONKA,
@@ -56,5 +64,5 @@ def utworz_klipy_tekstowe(sciezka, dlugosc_filmu):
                 .set_position(("center", 0.07), relative=True)
                 .crossfadein(0.4).crossfadeout(0.4))
         klipy.append(klip)
-        print(f"[TEKSTY] \"{tekst}\": {start:.1f}s - {start + czas:.1f}s")
+        raportuj(f"[TEKSTY] \"{tekst}\": {start:.1f}s - {start + czas:.1f}s")
     return klipy

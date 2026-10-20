@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -212,12 +212,22 @@ def _zapisz_stan(sciezka: Path, stan: Dict[str, Dict[str, str]]) -> None:
     tymczasowy.replace(sciezka)
 
 
+class WysylaniePrzerwane(Exception):
+    """Użytkownik przerwał wysyłanie filmów."""
+
+
+def _sprawdz_przerwanie(cancel_event: Optional[Any]) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise WysylaniePrzerwane("Wysyłanie przerwano przez użytkownika.")
+
+
 def _przeslij_film(
     youtube: Any,
     sciezka: Path,
     tytul: str,
     opis: str,
     termin: datetime,
+    cancel_event: Optional[Any] = None,
 ) -> str:
     from googleapiclient.http import MediaFileUpload
 
@@ -241,6 +251,7 @@ def _przeslij_film(
     )
     odpowiedz = None
     while odpowiedz is None:
+        _sprawdz_przerwanie(cancel_event)
         _, odpowiedz = request.next_chunk()
     video_id = odpowiedz.get("id")
     if not video_id:
@@ -255,23 +266,26 @@ def przetworz(
     publikuj: bool,
     plik_opisu: Path = PLIK_OPISU,
     plik_stanu: Path = PLIK_STANU,
+    log: Callable[[str], None] = print,
+    cancel_event: Optional[Any] = None,
 ) -> None:
     zajete_daty, zaplanowane, istniejace_tytuly = pobierz_kolejke(youtube, kanal)
     stan = _wczytaj_stan(plik_stanu)
     for film in zaplanowane:
         assert film.termin is not None
-        print(f"[YT] W kolejce: {film.termin:%Y-%m-%d %H:%M} — {film.tytul}")
+        log(f"[YT] W kolejce: {film.termin:%Y-%m-%d %H:%M} — {film.tytul}")
     for sciezka in sciezki:
+        _sprawdz_przerwanie(cancel_event)
         if not sciezka.is_file():
             raise FileNotFoundError(f"Nie znaleziono filmu: {sciezka}")
         _skrot_jest_poprawny(sciezka)
         tytul = generuj_tytul(sciezka, plik_opisu)
         hash_pliku = _hash_pliku(sciezka)
         if hash_pliku in stan:
-            print(f"[YT] Pominięto film już wysłany: {sciezka.name}")
+            log(f"[YT] Pominięto film już wysłany: {sciezka.name}")
             continue
         if tytul.casefold() in istniejace_tytuly:
-            print(f"[YT] Pominięto film o istniejącym tytule: {tytul}")
+            log(f"[YT] Pominięto film o istniejącym tytule: {tytul}")
             continue
 
         termin = najblizszy_wolny_termin(
@@ -280,14 +294,30 @@ def przetworz(
         opis, _ = generuj_opis_i_hashtagi(plik_opisu)
         if publikuj:
             sciezka = przemianuj_plik(sciezka, tytul)
-            video_id = _przeslij_film(youtube, sciezka, tytul, opis, termin)
+            log(f"[YT] Wysyłanie: {sciezka.name}…")
+            video_id = _przeslij_film(youtube, sciezka, tytul, opis, termin, cancel_event)
             stan[hash_pliku] = {"videoId": video_id, "title": tytul}
             _zapisz_stan(plik_stanu, stan)
-            print(f"[YT] Wysłano {sciezka.name}: https://youtu.be/{video_id}")
+            log(f"[YT] Wysłano {sciezka.name}: https://youtu.be/{video_id}")
         else:
-            print(f"[PODGLĄD] {tytul} — {termin:%Y-%m-%d %H:%M} Europe/Warsaw")
+            log(f"[PODGLĄD] {tytul} — {termin:%Y-%m-%d %H:%M} Europe/Warsaw")
         zajete_daty.add(termin.date())
         istniejace_tytuly.add(tytul.casefold())
+
+
+def wyslij_filmy(
+    filmy: List[Path],
+    publikuj: bool,
+    plik_opisu: Path = PLIK_OPISU,
+    client_secrets: Path = PLIK_CLIENT_SECRETS,
+    log: Callable[[str], None] = print,
+    cancel_event: Optional[Any] = None,
+) -> None:
+    youtube = _autoryzuj(client_secrets, PLIK_TOKENU)
+    _sprawdz_przerwanie(cancel_event)
+    kanal = _wybierz_kanal(youtube, os.environ.get("YOUTUBE_CHANNEL_ID"))
+    log(f"[YT] Kanał: {kanal.get('snippet', {}).get('title', kanal.get('id'))}")
+    przetworz(filmy, youtube, kanal, publikuj, plik_opisu, log=log, cancel_event=cancel_event)
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -325,13 +355,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not filmy:
         parser.error(f"Nie znaleziono plików MP4 w {args.wejscie}")
 
-    youtube = _autoryzuj(args.client_secrets, PLIK_TOKENU)
-    channel_id = os.environ.get("YOUTUBE_CHANNEL_ID")
-    kanal = _wybierz_kanal(youtube, channel_id)
-    print(
-        f"[YT] Kanał: {kanal.get('snippet', {}).get('title', kanal.get('id'))}"
-    )
-    przetworz(filmy, youtube, kanal, args.publish, args.opis)
+    wyslij_filmy(filmy, args.publish, args.opis, args.client_secrets)
 
 
 if __name__ == "__main__":

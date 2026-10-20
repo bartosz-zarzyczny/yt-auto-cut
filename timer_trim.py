@@ -1,3 +1,5 @@
+from typing import Callable, Optional
+
 PRZED_STARTEM = 0.5   # o tyle cofamy się względem wykrytego sygnału
 PO_KONCU = 0.8        # zapas po czasie przebiegu
 
@@ -16,13 +18,20 @@ def wyznacz_przyciecie(sygnaly, czas_przebiegu, dlugosc_wideo):
     return start, koniec
 
 
-def przytnij_wideo(video, sygnaly, czas_przebiegu):
+def przytnij_wideo(
+    video, sygnaly, czas_przebiegu, log_callback: Optional[Callable[[str], None]] = None
+):
     """Przycina klip do przebiegu i wypisuje informację na konsoli."""
+    def raportuj(tekst):
+        print(tekst)
+        if log_callback:
+            log_callback(tekst)
+
     wynik = wyznacz_przyciecie(sygnaly, czas_przebiegu, video.duration)
     if wynik is None:
-        print("[PRZYCIĘCIE] Pominięto - brak jednoznacznego wykrycia timera, zostaje pełny film.")
+        raportuj("[PRZYCIĘCIE] Pominięto - brak jednoznacznego wykrycia timera, zostaje pełny film.")
         return video
 
     start, koniec = wynik
-    print(f"[PRZYCIĘCIE] {start:.2f}s -> {koniec:.2f}s (czas przebiegu {czas_przebiegu:.2f}s)")
+    raportuj(f"[PRZYCIĘCIE] {start:.2f}s -> {koniec:.2f}s (czas przebiegu {czas_przebiegu:.2f}s)")
     return video.subclip(start, koniec)

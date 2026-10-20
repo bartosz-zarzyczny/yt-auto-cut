@@ -2,16 +2,23 @@ import argparse
 import os
 import re
 import random
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
+from typing import Callable, Optional
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, CompositeAudioClip, AudioFileClip
 import moviepy.audio.fx.all as afx
 from moviepy.config import change_settings
 from timer_detect import zglos_wykrycie_timera
 from timer_trim import przytnij_wideo
 from dodatkowe_teksty import utworz_klipy_tekstowe
+from kolejnosc_torow import ROZDZIELCZOSCI, ROZDZIELCZOSC_DOMYSLNA
 from mapowanie_torow import przypisz_tory
-from ustawienia_systemu import KATALOG_PROJEKTU, znajdz_imagemagick, wybierz_czcionke, sprawdz_srodowisko
+from migracja_plikow import przenies_stare_pliki
+from ustawienia_systemu import KATALOG_PROJEKTU, znajdz_imagemagick, wybierz_czcionke, sprawdz_srodowisko, preset_dla_kodeku
 from generuj_nazwy import generuj_tytul, przemianuj_plik
+from video_cancellation import CancellableProgressLogger, GenerationCancelled
 
 # Pillow compatibility: some Pillow versions removed Image.ANTIALIAS constant.
 # MoviePy / TextClip expects Image.ANTIALIAS; provide a fallback mapping to Resampling.LANCZOS.
@@ -38,8 +45,22 @@ FOLDER_WEJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Surowe")
 FOLDER_WYJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Gotowe")
 FOLDER_MUZYKI = os.path.join(KATALOG_PROJEKTU, "Muzyka")
 PLIK_Z_WYNIKAMI = os.path.join(KATALOG_PROJEKTU, "wyniki.txt")
-PLIK_Z_TEKSTAMI = os.path.join(KATALOG_PROJEKTU, "dodatkowe_teksty.txt")
-PLIK_Z_TORAMI = os.path.join(KATALOG_PROJEKTU, "tory.txt")
+PLIK_Z_TEKSTAMI = os.path.join(KATALOG_PROJEKTU, "teksty_wideo.txt")
+PLIK_Z_TORAMI = os.path.join(KATALOG_PROJEKTU, "mapowanie_torow.txt")
+PLIK_OPISU_ZAWODOW = os.path.join(KATALOG_PROJEKTU, "opis_zawodow.txt")
+przenies_stare_pliki(KATALOG_PROJEKTU)
+
+
+@dataclass(frozen=True)
+class KonfiguracjaSciezek:
+    folder_wejsciowy: Path = Path(FOLDER_WEJSCIOWY)
+    folder_wyjsciowy: Path = Path(FOLDER_WYJSCIOWY)
+    folder_muzyki: Path = Path(FOLDER_MUZYKI)
+    plik_z_wynikami: Path = Path(PLIK_Z_WYNIKAMI)
+    plik_z_tekstami: Path = Path(PLIK_Z_TEKSTAMI)
+    plik_z_torami: Path = Path(PLIK_Z_TORAMI)
+    plik_opisu_zawodow: Path = Path(PLIK_OPISU_ZAWODOW)
+    domyslna_orientacja: str = "V"
 
 # ===================================================================
 # FUNKCJE POMOCNICZE
@@ -72,45 +93,96 @@ def czytaj_wyniki_z_pliku(sciezka_do_pliku):
 # GŁÓWNA LOGIKA
 # ===================================================================
 
-def uruchom_automatyzacje(yt=False, publikuj=False):
-    srodowisko_ok, kodek = sprawdz_srodowisko(_magick)
-    if not srodowisko_ok:
-        return
+def uruchom_automatyzacje(
+    yt=False,
+    publikuj=False,
+    konfiguracja: Optional[KonfiguracjaSciezek] = None,
+    log_callback: Optional[Callable[[str], None]] = None,
+    progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
+    cancel_event: Optional[Event] = None,
+):
+    konfiguracja = konfiguracja or KonfiguracjaSciezek()
 
-    os.makedirs(FOLDER_WYJSCIOWY, exist_ok=True)
+    def raportuj(tekst):
+        print(tekst)
+        if log_callback:
+            log_callback(tekst)
+
+    def sprawdz_przerwanie():
+        if cancel_event and cancel_event.is_set():
+            raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
+
+    srodowisko_ok, kodek = sprawdz_srodowisko(_magick, raportuj)
+    if not srodowisko_ok:
+        raportuj("Nie można rozpocząć montażu: sprawdź wymagane narzędzia systemowe.")
+        return False
+
+    os.makedirs(konfiguracja.folder_wyjsciowy, exist_ok=True)
     
-    dane_torow = czytaj_wyniki_z_pliku(PLIK_Z_WYNIKAMI)
-    muzyka_pliki = [m for m in os.listdir(FOLDER_MUZYKI) if m.lower().endswith('.mp3')]
+    dane_torow = czytaj_wyniki_z_pliku(str(konfiguracja.plik_z_wynikami))
+    muzyka_pliki = [m for m in os.listdir(konfiguracja.folder_muzyki) if m.lower().endswith('.mp3')]
     
     wideo_pliki = [
-        w for w in os.listdir(FOLDER_WEJSCIOWY)
+        w for w in os.listdir(konfiguracja.folder_wejsciowy)
         if w.lower().endswith(('.mp4', '.mov')) and "TEMP_MPY_" not in w.upper()
     ]
     wideo_pliki.sort() 
+    przypisane_tory = przypisz_tory(
+        wideo_pliki,
+        str(konfiguracja.plik_z_torami),
+        ROZDZIELCZOSCI.get(konfiguracja.domyslna_orientacja, ROZDZIELCZOSC_DOMYSLNA),
+    )
+    if not przypisane_tory:
+        raportuj(f"Nie znaleziono filmów MP4/MOV w folderze: {konfiguracja.folder_wejsciowy}")
     
-    for nazwa_pliku, nr_toru, rozdzielczosc in przypisz_tory(wideo_pliki, PLIK_Z_TORAMI):
-        print(f"\n>>> Przetwarzanie: {nazwa_pliku} jako TOR {nr_toru}")
+    liczba_bledow = 0
+    przerwano = False
+    for indeks, (nazwa_pliku, nr_toru, rozdzielczosc) in enumerate(przypisane_tory, start=1):
+        if cancel_event and cancel_event.is_set():
+            przerwano = True
+            raportuj("Generowanie przerwano przez użytkownika.")
+            if progress_callback:
+                progress_callback(indeks, len(przypisane_tory), nazwa_pliku, "cancelled")
+            break
+
+        raportuj(f"\n>>> Przetwarzanie: {nazwa_pliku} jako TOR {nr_toru}")
         
         if nr_toru not in dane_torow:
+            raportuj(f"Pominięto {nazwa_pliku}: brak wyników dla toru {nr_toru}.")
+            if progress_callback:
+                progress_callback(indeks, len(przypisane_tory), nazwa_pliku, "skipped")
             continue
             
         dane = dane_torow[nr_toru]
         
-        sciezka_wej = os.path.join(FOLDER_WEJSCIOWY, nazwa_pliku)
-        sciezka_wyj = os.path.join(FOLDER_WYJSCIOWY, f"Gotowe_Stage_{nr_toru}.mp4")
+        sciezka_wej = os.path.join(konfiguracja.folder_wejsciowy, nazwa_pliku)
+        sciezka_wyj = os.path.join(konfiguracja.folder_wyjsciowy, f"Gotowe_Stage_{nr_toru}.mp4")
+        sciezka_wyj = Path(sciezka_wyj)
+        sciezka_tymczasowa = sciezka_wyj.with_name(
+            f"{sciezka_wyj.stem}_TEMP_MPY_{uuid.uuid4().hex}.mp4"
+        )
+        sciezka_audio_tymczasowego = sciezka_tymczasowa.with_name(
+            f"{sciezka_tymczasowa.stem}_TEMP_AUDIO.m4a"
+        )
+        video = None
+        wideo_koncowe = None
+        audio_muzyka = None
         
         try:
-            sygnaly = zglos_wykrycie_timera(sciezka_wej)
+            sprawdz_przerwanie()
+            sygnaly = zglos_wykrycie_timera(sciezka_wej, raportuj, cancel_event)
+            sprawdz_przerwanie()
             video = VideoFileClip(sciezka_wej)
-            video = przytnij_wideo(video, sygnaly, dane["czas"])
+            sprawdz_przerwanie()
+            video = przytnij_wideo(video, sygnaly, dane["czas"], raportuj)
 
             nowy_czas_trwania = video.duration
-            print(f"Czas wideo: {nowy_czas_trwania:.2f}s")
+            raportuj(f"Czas wideo: {nowy_czas_trwania:.2f}s")
             
             # --- MUZYKA ---
             if muzyka_pliki:
                 losowy_utwor = random.choice(muzyka_pliki)
-                sciezka_muzyki = os.path.join(FOLDER_MUZYKI, losowy_utwor)
+                sciezka_muzyki = os.path.join(konfiguracja.folder_muzyki, losowy_utwor)
                 
                 audio_muzyka = AudioFileClip(sciezka_muzyki)
                 audio_muzyka = afx.audio_loop(audio_muzyka, duration=nowy_czas_trwania)
@@ -140,40 +212,64 @@ def uruchom_automatyzacje(yt=False, publikuj=False):
             # --- ZMIANA ROZDZIELCZOŚCI (H = 1920x1080, V/domyślnie = 1080x1920) ---
             video = video.resize(newsize=rozdzielczosc)
             # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
-            teksty_gorne = utworz_klipy_tekstowe(PLIK_Z_TEKSTAMI, nowy_czas_trwania)
+            teksty_gorne = utworz_klipy_tekstowe(
+                str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
+            )
             wideo_koncowe = CompositeVideoClip([video, napis] + teksty_gorne, size=rozdzielczosc).set_fps(30)
+            sprawdz_przerwanie()
             
             # --- RENDEROWANIE Z ZACHOWANIEM KOLORÓW I BEZ OBROTÓW ---
-            print(f"Rozpoczynam renderowanie ({kodek})...")
+            raportuj(f"Rozpoczynam renderowanie ({kodek})...")
             wideo_koncowe.write_videofile(
-                sciezka_wyj, 
+                str(sciezka_tymczasowa),
                 fps=30, 
                 codec=kodek, 
                 audio_codec="aac",
                 bitrate="8000k",    
-                preset="fast",
+                preset=preset_dla_kodeku(kodek),
                 ffmpeg_params=['-pix_fmt', 'yuv420p'],  # Gwarantuje poprawne kolory i odtwarzanie w Windows
-                logger=None         
+                temp_audiofile=str(sciezka_audio_tymczasowego),
+                logger=CancellableProgressLogger(cancel_event or Event()),
             )
             
-            video.close()
-            wideo_koncowe.close()
-            sciezka_wyj = Path(sciezka_wyj)
-            tytul = generuj_tytul(sciezka_wyj)
+            sprawdz_przerwanie()
+            os.replace(sciezka_tymczasowa, sciezka_wyj)
+            tytul = generuj_tytul(sciezka_wyj, konfiguracja.plik_opisu_zawodow)
             sciezka_wyj = przemianuj_plik(sciezka_wyj, tytul)
-            print(f"Nadano nazwę: {sciezka_wyj.name}")
-            print("Zakończono sukcesem!\n")
+            raportuj(f"Nadano nazwę: {sciezka_wyj.name}")
+            raportuj("Zakończono sukcesem!\n")
+            if progress_callback:
+                progress_callback(indeks, len(przypisane_tory), nazwa_pliku, "done")
             
+        except GenerationCancelled:
+            przerwano = True
+            raportuj("Generowanie przerwano przez użytkownika.")
+            if progress_callback:
+                progress_callback(indeks, len(przypisane_tory), nazwa_pliku, "cancelled")
+            break
         except Exception as e:
-            print(f"BŁĄD podczas przetwarzania: {str(e)}\n")
+            liczba_bledow += 1
+            raportuj(f"BŁĄD podczas przetwarzania: {str(e)}\n")
+            if progress_callback:
+                progress_callback(indeks, len(przypisane_tory), nazwa_pliku, "error")
+        finally:
+            for klip in (wideo_koncowe, video, audio_muzyka):
+                if klip is not None:
+                    klip.close()
+            for plik_tymczasowy in (sciezka_tymczasowa, sciezka_audio_tymczasowego):
+                try:
+                    plik_tymczasowy.unlink()
+                except FileNotFoundError:
+                    pass
 
-    if yt:
+    if yt and not przerwano:
         from youtube_upload import main as uruchom_youtube
 
-        argumenty_youtube = [FOLDER_WYJSCIOWY]
+        argumenty_youtube = [str(konfiguracja.folder_wyjsciowy)]
         if publikuj:
             argumenty_youtube.append("--publish")
         uruchom_youtube(argumenty_youtube)
+    return bool(przypisane_tory) and liczba_bledow == 0 and not przerwano
 
 
 def main():
