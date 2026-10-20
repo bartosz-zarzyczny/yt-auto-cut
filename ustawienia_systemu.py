@@ -7,6 +7,7 @@ import sys
 from moviepy.config import get_setting
 
 from sprawdzanie_systemu import kodek_dziala, kodeki_sprzetowe, OPISY_KODEKOW, preset_dla_kodeku  # noqa: F401
+from ustawienia_aplikacji import znajdz_imagemagick as _znajdz_imagemagick_z_ustawien
 
 KATALOG_PROJEKTU = os.path.dirname(os.path.abspath(__file__))
 
@@ -41,11 +42,10 @@ def wybierz_czcionke():
 
 
 def znajdz_imagemagick(domyslna_windows=None):
-    """Zwraca ścieżkę do ImageMagick z PATH, a w ostateczności wartość domyślną (Windows)."""
-    for nazwa in ("magick", "convert"):
-        sciezka = shutil.which(nazwa)
-        if sciezka:
-            return sciezka
+    """Ścieżka z settings.json lub z PATH; w ostateczności wartość domyślna przekazana w argumencie."""
+    sciezka = _znajdz_imagemagick_z_ustawien()
+    if sciezka:
+        return sciezka
     if domyslna_windows and os.path.isfile(domyslna_windows):
         return domyslna_windows
     return None

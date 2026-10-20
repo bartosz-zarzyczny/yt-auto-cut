@@ -61,6 +61,7 @@ cover/
 youtube_client_secret.json
 youtube_token.json
 youtube_upload_state.json
+settings.json
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -222,9 +223,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Ignore user folders: Gotowe, Muzyka, Surowe
-Gotowe/
-Surowe/
+# Foldery robocze: zawartość ignorowana, same foldery zostają w repo (przez .gitkeep)
+Gotowe/*
+!Gotowe/.gitkeep
+Surowe/*
+!Surowe/.gitkeep
+logs/*
+!logs/.gitkeep
 
 youtube_client_secret.json
 youtube_token.json

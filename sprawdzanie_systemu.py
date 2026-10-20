@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import List
 
+from ustawienia_aplikacji import znajdz_imagemagick
 # (nazwa pakietu w pip, wymagana wersja)
 BIBLIOTEKI = (
     ("moviepy", "<2.0.0"),
@@ -187,7 +188,7 @@ def sprawdz_oprogramowanie() -> List[WynikTestu]:
                 "Kodek sprzętowy (opcjonalny)", True, "niedostępny",
                 f"Sprawdzono: {', '.join(sprawdzone)}. Montaż użyje libx264 (wolniej, ale działa wszędzie)"))
 
-    sciezka = shutil.which("magick") or shutil.which("convert")
+    sciezka = znajdz_imagemagick()
     if not sciezka and platform.system() == "Windows" and os.path.isfile(IMAGEMAGICK_WINDOWS):
         sciezka = IMAGEMAGICK_WINDOWS
     if not sciezka:

@@ -16,7 +16,9 @@ from dodatkowe_teksty import utworz_klipy_tekstowe
 from kolejnosc_torow import ROZDZIELCZOSCI, ROZDZIELCZOSC_DOMYSLNA
 from mapowanie_torow import przypisz_tory
 from migracja_plikow import przenies_stare_pliki
-from ustawienia_systemu import KATALOG_PROJEKTU, znajdz_imagemagick, wybierz_czcionke, sprawdz_srodowisko, preset_dla_kodeku
+from ustawienia_aplikacji import zapewnij_plik_ustawien
+from ustawienia_systemu import KATALOG_PROJEKTU, wybierz_czcionke, sprawdz_srodowisko, preset_dla_kodeku
+from ustawienia_aplikacji import znajdz_imagemagick
 from generuj_nazwy import generuj_tytul, przemianuj_plik
 from video_cancellation import CancellableProgressLogger, GenerationCancelled
 
@@ -33,10 +35,19 @@ if _PILImage is not None and not hasattr(_PILImage, 'ANTIALIAS'):
     elif hasattr(_PILImage, 'LANCZOS'):
         _PILImage.ANTIALIAS = _PILImage.LANCZOS
 
-# Ścieżka do ImageMagick (zostaw swoją, jeśli działała)
-_magick = znajdz_imagemagick(r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe")
-if _magick:
-    change_settings({"IMAGEMAGICK_BINARY": _magick})
+# Ścieżka do ImageMagick pochodzi z settings.json (klucz imagemagick_path); gdy jej tam nie ma, szukamy w PATH.
+zapewnij_plik_ustawien()
+
+
+def zastosuj_imagemagick():
+    """Odczytuje ścieżkę z settings.json i przekazuje ją MoviePy. Zwraca ścieżkę lub None."""
+    sciezka = znajdz_imagemagick()
+    if sciezka:
+        change_settings({"IMAGEMAGICK_BINARY": sciezka})
+    return sciezka
+
+
+_magick = zastosuj_imagemagick()
 
 # ===================================================================
 # KONFIGURACJA ŚCIEŻEK
@@ -112,7 +123,7 @@ def uruchom_automatyzacje(
         if cancel_event and cancel_event.is_set():
             raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
 
-    srodowisko_ok, kodek = sprawdz_srodowisko(_magick, raportuj)
+    srodowisko_ok, kodek = sprawdz_srodowisko(zastosuj_imagemagick(), raportuj)
     if not srodowisko_ok:
         raportuj("Nie można rozpocząć montażu: sprawdź wymagane narzędzia systemowe.")
         return False

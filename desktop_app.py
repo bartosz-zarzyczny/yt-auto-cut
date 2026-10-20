@@ -35,10 +35,17 @@ from PySide6.QtWidgets import (
 
 from dataclasses import dataclass
 from migracja_plikow import popraw_sciezke, przenies_stare_pliki
+from ustawienia_aplikacji import (
+    PLIK_USTAWIEN,
+    zapewnij_plik_ustawien,
+    zapisana_sciezka_imagemagick,
+    zapisz_sciezke_imagemagick,
+)
 from sprawdzanie_systemu import formatuj_html, uruchom_test_systemu
 
 PROJEKT = Path(__file__).resolve().parent
 przenies_stare_pliki(PROJEKT)
+zapewnij_plik_ustawien()
 
 try:
     from ipsc_automato import (
@@ -363,6 +370,7 @@ class MainWindow(QMainWindow):
         muzyka_layout = QVBoxLayout(muzyka)
         self._dodaj_pole_sciezki(muzyka_layout, "folder_muzyki", "Folder z muzyką", "dir")
         layout.addWidget(muzyka)
+        layout.addWidget(self._zbuduj_imagemagick())
         layout.addWidget(self._stworz_edytor("plik_z_tekstami", "Teksty wideo"))
         layout.addWidget(self._stworz_edytor("plik_opisu_zawodow", "Opis zawodów"))
         layout.addStretch(1)
@@ -513,6 +521,59 @@ class MainWindow(QMainWindow):
         self.yt_worker = None
         self.yt_thread = None
         self.yt_start.setEnabled(True)
+
+    def _zbuduj_imagemagick(self):
+        grupa = QGroupBox("ImageMagick (napisy)")
+        layout = QVBoxLayout(grupa)
+        wiersz = QHBoxLayout()
+        etykieta = QLabel("Program magick")
+        etykieta.setMinimumWidth(150)
+        self.pole_imagemagick = QLineEdit(zapisana_sciezka_imagemagick())
+        self.pole_imagemagick.setClearButtonEnabled(True)
+        self.pole_imagemagick.setPlaceholderText("Pusto = automatyczne wyszukiwanie w PATH")
+        self.pole_imagemagick.editingFinished.connect(self._zapisz_imagemagick)
+        przycisk = QPushButton("Przeglądaj…")
+        przycisk.clicked.connect(self._wybierz_imagemagick)
+        wiersz.addWidget(etykieta)
+        wiersz.addWidget(self.pole_imagemagick, 1)
+        wiersz.addWidget(przycisk)
+        layout.addLayout(wiersz)
+        self.status_imagemagick = QLabel("")
+        self.status_imagemagick.setObjectName("fileStatus")
+        layout.addWidget(self.status_imagemagick)
+        self._pokaz_status_imagemagick()
+        return grupa
+
+    def _wybierz_imagemagick(self, checked: bool = False):
+        del checked
+        aktualna = self.pole_imagemagick.text().strip()
+        filtr = "Program (*.exe);;Wszystkie pliki (*)" if sys.platform == "win32" else "Wszystkie pliki (*)"
+        sciezka, _ = QFileDialog.getOpenFileName(
+            self, "Wskaż program ImageMagick (magick)", aktualna or str(Path.home()), filtr
+        )
+        if sciezka:
+            self.pole_imagemagick.setText(str(Path(sciezka)))
+            self._zapisz_imagemagick()
+
+    def _zapisz_imagemagick(self):
+        sciezka = self.pole_imagemagick.text().strip()
+        try:
+            zapisz_sciezke_imagemagick(sciezka)
+        except OSError as blad:
+            self.status_imagemagick.setText(f"Nie udało się zapisać settings.json: {blad}")
+            return
+        self._pokaz_status_imagemagick()
+
+    def _pokaz_status_imagemagick(self):
+        sciezka = self.pole_imagemagick.text().strip()
+        if not sciezka:
+            self.status_imagemagick.setText(f"Zapisano w {PLIK_USTAWIEN.name}: automatyczne wyszukiwanie w PATH")
+        elif Path(sciezka).is_file():
+            self.status_imagemagick.setText(f"Zapisano w {PLIK_USTAWIEN.name}: {sciezka}")
+        else:
+            self.status_imagemagick.setText(
+                f"Zapisano w {PLIK_USTAWIEN.name}, ale plik nie istnieje — użyty zostanie ImageMagick z PATH"
+            )
 
     def _zbuduj_pomoc(self):
         strona = QWidget()

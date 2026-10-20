@@ -66,7 +66,7 @@ Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejnoś
 |---|---|
 | **Główna** | Wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
 | **Zawody** | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`) |
-| **Konfiguracja** | Folder z muzyką oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
+| **Konfiguracja** | Folder z muzyką, ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube** | Wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania |
 | **Pomoc** | Przycisk **Test Systemu** oraz ten plik README z formatowaniem |
 
@@ -98,7 +98,12 @@ Aplikacja korzysta z tych samych wymagań systemowych co montaż konsolowy: FFmp
 Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub dowolnym edytorze kodu i dostosuj następujące ustawienia na samej górze pliku:
 
 1. **ImageMagick:**
-   Skrypt sam szuka `magick`/`convert` w `PATH` (Windows: dodatkowo w `C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\`). Jeśli masz inną wersję, zmień ścieżkę domyślną w wywołaniu `znajdz_imagemagick(...)` na górze `ipsc_automato.py`.
+   Ścieżka do `magick.exe` jest zapisana w pliku **`settings.json`** (klucz `imagemagick_path`) w katalogu projektu — plik powstaje automatycznie przy pierwszym uruchomieniu (na Windows z dotychczasową ścieżką domyślną `C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe`) i jest lokalny dla komputera (ignorowany przez Git). Jeśli masz inną wersję lub folder, zmień wartość w pliku albo w aplikacji desktopowej: zakładka **Konfiguracja → ImageMagick (napisy) → Przeglądaj…**. Gdy ścieżka jest pusta lub wskazuje nieistniejący plik, skrypt szuka `magick`/`convert` w `PATH`. Zmiana działa od następnego montażu.
+   ```json
+   {
+     "imagemagick_path": "C:\\Program Files\\ImageMagick-7.1.2-Q16-HDRI\\magick.exe"
+   }
+   ```
 
 2. **Ścieżki do folderów roboczych:**
    Domyślnie są **względne** – liczone od folderu ze skryptem (`KATALOG_PROJEKTU`), więc projekt działa na Windows, macOS i Linuksie po skopiowaniu w dowolne miejsce:
@@ -250,7 +255,7 @@ python ipsc_automato.py --yt --publish
 *   **Zakładka YouTube: „Brak pliku OAuth” lub „Brak bibliotek Google API”:** Zapisz `youtube_client_secret.json` w katalogu projektu (instrukcja wyżej) i zainstaluj zależności `python -m pip install -r requirements.txt`.
 *   **Zakładka YouTube: „Short musi mieć format pionowy lub kwadratowy”:** Film wybrany do wysyłki jest poziomy lub dłuższy niż 3 minuty — wygeneruj go ponownie jako **Wideo Pionowe**.
 *   **Aplikacja po starcie otwiera zakładkę Pomoc:** Test systemu wykrył braki — wykonaj polecenia z sekcji **Do doinstalowania / naprawy** i uruchom aplikację ponownie.
-*   **Błąd `[WinError 2] Nie można odnaleźć określonego pliku` lub problem z `None`:** MoviePy nie może znaleźć programu ImageMagick. Upewnij się, że ścieżka do `magick.exe` (lub `convert.exe`) w `change_settings` w kodzie jest w 100% poprawna dla Twojego komputera.
+*   **Błąd `[WinError 2] Nie można odnaleźć określonego pliku` lub problem z `None`:** MoviePy nie może znaleźć programu ImageMagick. Upewnij się, że ścieżka do `magick.exe` (lub `convert.exe`) w `settings.json` (lub w zakładce **Konfiguracja** aplikacji) jest w 100% poprawna dla Twojego komputera.
 *   **Błąd `ModuleNotFoundError: No module named 'moviepy.editor'`:** Masz zainstalowaną nową wersję MoviePy (2.0+). Wpisz w konsoli `pip uninstall moviepy` a następnie `pip install "moviepy<2.0.0"`.
 *   **Błąd `must be real number, not NoneType` przy zapisie wideo:** Masz zbyt nową bibliotekę `decorator`. Użyj `pip install "decorator==4.4.2"`.
 *   **Błąd `Accessing time t=... with clip duration=...` dla muzyki:** Skrypt zapętla muzykę, więc krótki utwór nie powinien go wywołać; sprawdź, czy plik `.mp3` nie jest uszkodzony.
