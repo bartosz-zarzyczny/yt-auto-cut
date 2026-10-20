@@ -43,18 +43,25 @@ class FilmWKolejce:
 
 
 def najblizszy_wolny_termin(
-    zajete_daty: Set[date], teraz: Optional[datetime] = None
+    zajete_daty: Set[date],
+    teraz: Optional[datetime] = None,
+    godziny: Optional[Dict[int, time]] = None,
 ) -> datetime:
+    """Zwraca najbliższy wolny termin; `godziny` mapuje dzień tygodnia (0=pon) na godzinę."""
     teraz = teraz or datetime.now(STREFA_CZASOWA)
     if teraz.tzinfo is None:
         raise ValueError("Bieżący czas musi zawierać informację o strefie czasowej.")
     teraz = teraz.astimezone(STREFA_CZASOWA)
     dzien = teraz.date()
     while True:
-        godzina = time(10, 0) if dzien.weekday() >= 5 else time(7, 30)
-        termin = datetime.combine(dzien, godzina, tzinfo=STREFA_CZASOWA)
-        if dzien not in zajete_daty and termin > teraz:
-            return termin
+        if godziny:
+            godzina = godziny.get(dzien.weekday())
+        else:
+            godzina = time(10, 0) if dzien.weekday() >= 5 else time(7, 30)
+        if godzina is not None:
+            termin = datetime.combine(dzien, godzina, tzinfo=STREFA_CZASOWA)
+            if dzien not in zajete_daty and termin > teraz:
+                return termin
         dzien += timedelta(days=1)
 
 
@@ -226,21 +233,24 @@ def _przeslij_film(
     sciezka: Path,
     tytul: str,
     opis: str,
-    termin: datetime,
+    termin: Optional[datetime],
     cancel_event: Optional[Any] = None,
 ) -> str:
     from googleapiclient.http import MediaFileUpload
 
+    status: Dict[str, Any] = {"privacyStatus": "public"}
+    if termin is not None:
+        status = {
+            "privacyStatus": "private",
+            "publishAt": termin.astimezone(STREFA_CZASOWA).isoformat(),
+        }
     body = {
         "snippet": {
             "title": tytul,
             "description": opis,
             "categoryId": YOUTUBE_CATEGORY_SPORTS,
         },
-        "status": {
-            "privacyStatus": "private",
-            "publishAt": termin.astimezone(STREFA_CZASOWA).isoformat(),
-        },
+        "status": status,
     }
     request = youtube.videos().insert(
         part="snippet,status",
@@ -268,6 +278,8 @@ def przetworz(
     plik_stanu: Path = PLIK_STANU,
     log: Callable[[str], None] = print,
     cancel_event: Optional[Any] = None,
+    godziny: Optional[Dict[int, time]] = None,
+    od_razu: bool = False,
 ) -> None:
     zajete_daty, zaplanowane, istniejace_tytuly = pobierz_kolejke(youtube, kanal)
     stan = _wczytaj_stan(plik_stanu)
@@ -288,9 +300,11 @@ def przetworz(
             log(f"[YT] Pominięto film o istniejącym tytule: {tytul}")
             continue
 
-        termin = najblizszy_wolny_termin(
-            zajete_daty, datetime.now(STREFA_CZASOWA)
-        )
+        termin = None
+        if not od_razu:
+            termin = najblizszy_wolny_termin(
+                zajete_daty, datetime.now(STREFA_CZASOWA), godziny
+            )
         opis, _ = generuj_opis_i_hashtagi(plik_opisu)
         if publikuj:
             sciezka = przemianuj_plik(sciezka, tytul)
@@ -299,9 +313,12 @@ def przetworz(
             stan[hash_pliku] = {"videoId": video_id, "title": tytul}
             _zapisz_stan(plik_stanu, stan)
             log(f"[YT] Wysłano {sciezka.name}: https://youtu.be/{video_id}")
+        elif termin is None:
+            log(f"[PODGLĄD] {tytul} — publikacja od razu")
         else:
             log(f"[PODGLĄD] {tytul} — {termin:%Y-%m-%d %H:%M} Europe/Warsaw")
-        zajete_daty.add(termin.date())
+        if termin is not None:
+            zajete_daty.add(termin.date())
         istniejace_tytuly.add(tytul.casefold())
 
 
@@ -312,12 +329,17 @@ def wyslij_filmy(
     client_secrets: Path = PLIK_CLIENT_SECRETS,
     log: Callable[[str], None] = print,
     cancel_event: Optional[Any] = None,
+    godziny: Optional[Dict[int, time]] = None,
+    od_razu: bool = False,
 ) -> None:
     youtube = _autoryzuj(client_secrets, PLIK_TOKENU)
     _sprawdz_przerwanie(cancel_event)
     kanal = _wybierz_kanal(youtube, os.environ.get("YOUTUBE_CHANNEL_ID"))
     log(f"[YT] Kanał: {kanal.get('snippet', {}).get('title', kanal.get('id'))}")
-    przetworz(filmy, youtube, kanal, publikuj, plik_opisu, log=log, cancel_event=cancel_event)
+    przetworz(
+        filmy, youtube, kanal, publikuj, plik_opisu,
+        log=log, cancel_event=cancel_event, godziny=godziny, od_razu=od_razu,
+    )
 
 
 def main(argv: Optional[List[str]] = None) -> None:

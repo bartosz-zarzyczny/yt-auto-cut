@@ -67,14 +67,14 @@ Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejnoś
 | **Główna** | Wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
 | **Zawody** | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`) |
 | **Konfiguracja** | Folder z muzyką, ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
-| **YouTube** | Wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania |
+| **YouTube** | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania |
 | **Pomoc** | Przycisk **Test Systemu** oraz ten plik README z formatowaniem |
 
 **Zapamiętywanie ścieżek.** Wszystkie wybrane foldery i pliki są zapisywane lokalnie dla bieżącego użytkownika (`QSettings`) i przywracane po ponownym uruchomieniu aplikacji.
 
 **Edytory plików TXT.** Pod każdym edytorem jest pole ze ścieżką, przycisk **Przeglądaj…** oraz **Wczytaj z pliku** i **Zapisz do pliku** (kodowanie UTF-8). Zawartość plików wczytuje się automatycznie przy starcie, a po wskazaniu innego pliku od razu. Aplikacja ostrzega przed utratą niezapisanych zmian, a przy starcie montażu sama zapisuje zmienione edytory.
 
-Montaż działa w tle; postęp i komunikaty są widoczne w oknie. Podczas montażu można użyć przycisku **Przerwij generowanie** — bieżący etap zostanie bezpiecznie zatrzymany, niedokończony plik tymczasowy usunięty, a wcześniej gotowe filmy pozostaną bez zmian. **Wysyłanie na YouTube z aplikacji.** Zakładka **YouTube** domyślnie używa folderu **Gotowe filmy** (pole jest wtedy wyszarzone i podąża za zakładką Główna). Odznacz „Taki sam jak Gotowe filmy”, aby wskazać inny folder z plikami MP4 — wybór jest zapamiętywany. **Wyślij do YT** prosi o potwierdzenie i wysyła filmy jako prywatne z zaplanowaną publikacją (wymaga skonfigurowanego klucza — patrz sekcja o YouTube API); „Tylko podgląd” pokazuje wyłącznie tytuły i terminy. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku (nie da się przerwać okna logowania Google w przeglądarce). Już wysłane filmy są pomijane. To samo można zrobić z konsoli (`python youtube_upload.py`).
+Montaż działa w tle; postęp i komunikaty są widoczne w oknie. Podczas montażu można użyć przycisku **Przerwij generowanie** — bieżący etap zostanie bezpiecznie zatrzymany, niedokończony plik tymczasowy usunięty, a wcześniej gotowe filmy pozostaną bez zmian. **Wysyłanie na YouTube z aplikacji.** Zakładka **YouTube** domyślnie używa folderu **Gotowe filmy** (pole jest wtedy wyszarzone i podąża za zakładką Główna). Odznacz „Taki sam jak Gotowe filmy”, aby wskazać inny folder z plikami MP4 — wybór jest zapamiętywany. **Wyślij do YT** prosi o potwierdzenie i wysyła filmy jako prywatne z zaplanowaną publikacją (lub od razu publiczne, jeśli wybierzesz „Publikuj wszystkie od razu” w sekcji **PUBLIKACJA**) (wymaga skonfigurowanego klucza — patrz sekcja o YouTube API); „Tylko podgląd” pokazuje wyłącznie tytuły i terminy. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku (nie da się przerwać okna logowania Google w przeglądarce). Już wysłane filmy są pomijane. To samo można zrobić z konsoli (`python youtube_upload.py`).
 
 ### 🩺 Test Systemu
 
@@ -202,10 +202,16 @@ Nie używaj konta usługi — upload odbywa się w imieniu zalogowanego kanału.
 ### Wysyłanie z aplikacji desktopowej (zakładka YouTube)
 
 1. Wybierz folder z filmami: domyślnie jest to folder **Gotowe filmy** z zakładki Główna. Odznacz „Taki sam jak Gotowe filmy”, aby wskazać dowolny inny folder (np. gdy filmy przeniosłeś lub chcesz wysłać tylko część); wybór jest zapamiętywany.
-2. Zostaw zaznaczone **Tylko podgląd**, aby zobaczyć w dzienniku tytuły i terminy publikacji bez wysyłania. Gdy wszystko się zgadza, odznacz tę opcję.
-3. Kliknij **Wyślij do YT** i potwierdź. Filmy są wysyłane po kolei jako prywatne z zaplanowaną publikacją (zasady terminów — patrz niżej), a postęp widać w dzienniku wysyłania.
-4. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku; film przerwany w trakcie nie zostaje zapisany w rejestrze, więc kolejna próba wyśle go od nowa. Już wysłane filmy są pomijane (rejestr `youtube_upload_state.json`). Okna logowania Google w przeglądarce nie da się przerwać z aplikacji — zamknij je ręcznie.
-5. Aplikacja nie zamknie się w trakcie wysyłania; najpierw ją przerwij.
+2. Na górze zakładki, w sekcji **PUBLIKACJA**, wybierz sposób publikacji (ustawienia są zapamiętywane):
+   - **Zaplanuj publikację** (domyślnie) — filmy trafiają na YouTube jako prywatne z terminem publikacji. Bez dodatkowych opcji obowiązuje harmonogram domyślny: pon–pt 7:30, sob–nd 10:00.
+   - **Własne dni i godziny publikacji** — po zaznaczeniu tego checkboxa aktywują się kolumny Pon–Nd. Zaznacz dni, w których chcesz publikować, i ustaw dla każdego własną godzinę (`HH:mm`). Każdy film dostaje najbliższy wolny termin w jednym z zaznaczonych dni (jeden film na dzień). Trzeba zaznaczyć co najmniej jeden dzień.
+   - **Publikuj wszystkie od razu** — filmy są wysyłane jako publiczne, bez terminu; opcje planowania są wtedy wyszarzone.
+3. Zostaw zaznaczone **Tylko podgląd**, aby zobaczyć w dzienniku tytuły i terminy publikacji bez wysyłania. Gdy wszystko się zgadza, odznacz tę opcję.
+4. Kliknij **Wyślij do YT** i potwierdź (okno wskazuje, czy filmy będą zaplanowane, czy opublikowane natychmiast). Postęp widać w dzienniku wysyłania.
+5. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku; film przerwany w trakcie nie zostaje zapisany w rejestrze, więc kolejna próba wyśle go od nowa. Już wysłane filmy są pomijane (rejestr `youtube_upload_state.json`). Okna logowania Google w przeglądarce nie da się przerwać z aplikacji — zamknij je ręcznie.
+6. Aplikacja nie zamknie się w trakcie wysyłania; najpierw ją przerwij.
+
+Opcje sekcji **PUBLIKACJA** dotyczą tylko aplikacji desktopowej; uploader uruchamiany z konsoli zawsze używa harmonogramu domyślnego.
 
 Przy braku `youtube_client_secret.json` lub bibliotek Google aplikacja pokaże komunikat błędu w dzienniku — patrz instrukcja uzyskania klucza powyżej oraz zakładka **Pomoc → Test Systemu**.
 
@@ -217,7 +223,7 @@ Uzupełnij `opis_zawodow.txt` nazwą i datą zawodów. Generator `generuj_nazwy.
 python generuj_nazwy.py Gotowe_Stage_1.mp4
 ```
 
-Uploader `youtube_upload.py` jest uruchamiany z głównego skryptu wyłącznie po podaniu opcji `/yt` lub `--yt` (lub przyciskiem **Wyślij do YT** w aplikacji desktopowej). Odczytuje playlistę przesłanych filmów kanału, sprawdza zaplanowane publikacje i wybiera najbliższy wolny dzień: poniedziałek–piątek o 7:30, sobota–niedziela o 10:00 czasu `Europe/Warsaw`. Uwzględnia terminy filmów zaplanowanych oraz dni publikacji filmów publicznych i niepublicznych. Opis YouTube zawiera tylko nazwę, datę, lokalizację, typ i poziom zawodów oraz hashtagi tworzone z tych pól — nie kopiuje całego pliku z opisem zawodów.
+Uploader `youtube_upload.py` jest uruchamiany z głównego skryptu wyłącznie po podaniu opcji `/yt` lub `--yt` (lub przyciskiem **Wyślij do YT** w aplikacji desktopowej). Odczytuje playlistę przesłanych filmów kanału, sprawdza zaplanowane publikacje i wybiera najbliższy wolny dzień: domyślnie poniedziałek–piątek o 7:30, sobota–niedziela o 10:00 czasu `Europe/Warsaw` (w aplikacji desktopowej można to zmienić w sekcji **PUBLIKACJA** albo publikować od razu). Uwzględnia terminy filmów zaplanowanych oraz dni publikacji filmów publicznych i niepublicznych. Opis YouTube zawiera tylko nazwę, datę, lokalizację, typ i poziom zawodów oraz hashtagi tworzone z tych pól — nie kopiuje całego pliku z opisem zawodów.
 
 Standardowe uruchomienie montuje filmy i zmienia ich nazwy, ale nie uruchamia połączenia z YouTube. Opcja `/yt` lub `--yt` po zakończeniu montażu uruchamia **tylko podgląd** kolejki — nic nie jest przesyłane:
 

@@ -8,6 +8,7 @@ except ImportError:
     pokaz_raport_bez_qt()
     sys.exit(1)
 
+from datetime import time as dt_time
 from functools import partial
 from threading import Event
 from typing import Dict, Optional
@@ -16,8 +17,11 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,6 +31,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QSizePolicy,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -44,6 +50,8 @@ from ustawienia_aplikacji import (
 from sprawdzanie_systemu import formatuj_html, uruchom_test_systemu
 
 PROJEKT = Path(__file__).resolve().parent
+DNI_TYGODNIA = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"]
+GODZINY_PUBLIKACJI = [f"{g:02d}:{m:02d}" for g in range(24) for m in range(0, 60, 15)]
 przenies_stare_pliki(PROJEKT)
 zapewnij_plik_ustawien()
 
@@ -141,12 +149,22 @@ class YouTubeWorker(QObject):
     log = Signal(str)
     completed = Signal(bool, str)
 
-    def __init__(self, folder: Path, opis: Path, publikuj: bool, cancel_event: Event):
+    def __init__(
+        self,
+        folder: Path,
+        opis: Path,
+        publikuj: bool,
+        cancel_event: Event,
+        godziny: Optional[Dict[int, dt_time]] = None,
+        od_razu: bool = False,
+    ):
         super().__init__()
         self.folder = folder
         self.opis = opis
         self.publikuj = publikuj
         self.cancel_event = cancel_event
+        self.godziny = godziny
+        self.od_razu = od_razu
 
     def run(self):
         try:
@@ -166,6 +184,8 @@ class YouTubeWorker(QObject):
                 plik_opisu=self.opis,
                 log=self.log.emit,
                 cancel_event=self.cancel_event,
+                godziny=self.godziny,
+                od_razu=self.od_razu,
             )
         except Exception as blad:
             if type(blad).__name__ == "WysylaniePrzerwane":
@@ -384,6 +404,7 @@ class MainWindow(QMainWindow):
         opis = QLabel("Wysyłanie gotowych filmów (Shorts) na YouTube z planowaniem publikacji.")
         opis.setObjectName("muted")
         layout.addWidget(opis)
+        layout.addWidget(self._zbuduj_publikacje())
 
         grupa = QGroupBox("Folder z filmami do wysłania")
         grupa_layout = QVBoxLayout(grupa)
@@ -439,7 +460,15 @@ class MainWindow(QMainWindow):
 
         self.fields["folder_wyjsciowy"].textChanged.connect(self._odswiez_folder_yt)
         self._zmien_tryb_folderu_yt()
-        return strona
+        self.yt_log.setMinimumHeight(140)
+        przewijanie = QScrollArea()
+        przewijanie.setWidgetResizable(True)
+        przewijanie.setFrameShape(QFrame.NoFrame)
+        przewijanie.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        przewijanie.setWidget(strona)
+        strona.setObjectName("scrollPage")
+        strona.setStyleSheet("QWidget#scrollPage { background: transparent; }")
+        return przewijanie
 
     def _zmien_tryb_folderu_yt(self, checked: bool = False):
         del checked
@@ -452,6 +481,86 @@ class MainWindow(QMainWindow):
     def _odswiez_folder_yt(self, *_):
         if self.yt_ten_sam_folder.isChecked():
             self.yt_folder.setText(self.fields["folder_wyjsciowy"].text().strip())
+
+    def _zbuduj_publikacje(self):
+        grupa = QGroupBox("PUBLIKACJA")
+        layout = QVBoxLayout(grupa)
+        self.yt_tryb_plan = QRadioButton("Zaplanuj publikację")
+        self.yt_tryb_od_razu = QRadioButton("Publikuj wszystkie od razu")
+        od_razu = str(self.settings.value("yt_od_razu", "false")).lower() == "true"
+        self.yt_tryb_od_razu.setChecked(od_razu)
+        self.yt_tryb_plan.setChecked(not od_razu)
+        grupa_radio = QButtonGroup(self)
+        grupa_radio.addButton(self.yt_tryb_plan)
+        grupa_radio.addButton(self.yt_tryb_od_razu)
+        layout.addWidget(self.yt_tryb_plan)
+
+        self.yt_wlasny_plan = QCheckBox("Własne dni i godziny publikacji (inaczej: pn–pt 7:30, sob–nd 10:00)")
+        self.yt_wlasny_plan.setChecked(str(self.settings.value("yt_wlasny_plan", "false")).lower() == "true")
+        layout.addWidget(self.yt_wlasny_plan)
+
+        domyslne = {d: "07:30" if d < 5 else "10:00" for d in range(7)}
+        siatka = QGridLayout()
+        siatka.setHorizontalSpacing(10)
+        siatka.setVerticalSpacing(6)
+        siatka.setContentsMargins(0, 6, 0, 6)
+        self.yt_dni: Dict[int, tuple] = {}
+        for numer, nazwa in enumerate(DNI_TYGODNIA):
+            checkbox = QCheckBox(nazwa)
+            checkbox.setMinimumHeight(30)
+            checkbox.setChecked(str(self.settings.value(f"yt_dzien_{numer}", "true")).lower() == "true")
+            godzina = QComboBox()
+            godzina.addItems(GODZINY_PUBLIKACJI)
+            zapisana = str(self.settings.value(f"yt_godzina_{numer}", domyslne[numer]))
+            if zapisana not in GODZINY_PUBLIKACJI:
+                zapisana = domyslne[numer]
+            godzina.setCurrentText(zapisana)
+            godzina.setMaxVisibleItems(12)
+            hint = godzina.sizeHint()
+            godzina.setMinimumSize(int(hint.width() * 1.2), max(34, int(hint.height() * 1.2)))
+            checkbox.toggled.connect(godzina.setEnabled)
+            godzina.setEnabled(checkbox.isChecked())
+            siatka.addWidget(checkbox, 0, numer)
+            siatka.addWidget(godzina, 1, numer)
+            siatka.setColumnStretch(numer, 1)
+            self.yt_dni[numer] = (checkbox, godzina)
+        layout.addLayout(siatka)
+        layout.addWidget(self.yt_tryb_od_razu)
+        grupa.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        for kontrolka in (self.yt_tryb_plan, self.yt_tryb_od_razu, self.yt_wlasny_plan):
+            kontrolka.toggled.connect(self._zmien_publikacje)
+        for checkbox, godzina in self.yt_dni.values():
+            checkbox.toggled.connect(self._zmien_publikacje)
+            godzina.currentTextChanged.connect(self._zmien_publikacje)
+        self._odswiez_publikacje()
+        return grupa
+
+    def _zmien_publikacje(self, *_):
+        s = self.settings
+        s.setValue("yt_od_razu", "true" if self.yt_tryb_od_razu.isChecked() else "false")
+        s.setValue("yt_wlasny_plan", "true" if self.yt_wlasny_plan.isChecked() else "false")
+        for numer, (checkbox, godzina) in self.yt_dni.items():
+            s.setValue(f"yt_dzien_{numer}", "true" if checkbox.isChecked() else "false")
+            s.setValue(f"yt_godzina_{numer}", godzina.currentText())
+        self._odswiez_publikacje()
+
+    def _odswiez_publikacje(self):
+        plan = self.yt_tryb_plan.isChecked()
+        self.yt_wlasny_plan.setEnabled(plan)
+        aktywny = plan and self.yt_wlasny_plan.isChecked()
+        for checkbox, godzina in self.yt_dni.values():
+            checkbox.setEnabled(aktywny)
+            godzina.setEnabled(aktywny and checkbox.isChecked())
+
+    def _godziny_publikacji(self) -> Optional[Dict[int, dt_time]]:
+        if self.yt_tryb_od_razu.isChecked() or not self.yt_wlasny_plan.isChecked():
+            return None
+        return {
+            numer: dt_time.fromisoformat(godzina.currentText())
+            for numer, (checkbox, godzina) in self.yt_dni.items()
+            if checkbox.isChecked()
+        }
 
     def _wybierz_folder_yt(self, checked: bool = False):
         del checked
@@ -472,10 +581,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nieprawidłowy folder", f"Folder nie istnieje:\n{folder}")
             return
         publikuj = not self.yt_podglad.isChecked()
+        godziny = self._godziny_publikacji()
+        od_razu = self.yt_tryb_od_razu.isChecked()
+        if godziny is not None and not godziny:
+            QMessageBox.warning(self, "Publikacja", "Zaznacz co najmniej jeden dzień tygodnia.")
+            return
+        opis_trybu = (
+            "NATYCHMIAST jako publiczne" if od_razu else "prywatne, z zaplanowaną publikacją"
+        )
         if publikuj and QMessageBox.question(
             self,
             "Wysyłanie na YouTube",
-            f"Wysłać filmy MP4 z folderu:\n{folder}\n\nna YouTube (prywatne, z zaplanowaną publikacją)?",
+            f"Wysłać filmy MP4 z folderu:\n{folder}\n\nna YouTube ({opis_trybu})?",
         ) != QMessageBox.Yes:
             return
         self.yt_log.clear()
@@ -485,7 +602,12 @@ class MainWindow(QMainWindow):
         self.yt_cancel_event = Event()
         self.yt_thread = QThread(self)
         self.yt_worker = YouTubeWorker(
-            folder, Path(self.fields["plik_opisu_zawodow"].text().strip()), publikuj, self.yt_cancel_event
+            folder,
+            Path(self.fields["plik_opisu_zawodow"].text().strip()),
+            publikuj,
+            self.yt_cancel_event,
+            godziny,
+            od_razu,
         )
         self.yt_worker.moveToThread(self.yt_thread)
         self.yt_thread.started.connect(self.yt_worker.run)
