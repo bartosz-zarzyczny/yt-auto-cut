@@ -5,61 +5,61 @@ import platform
 import shutil
 from pathlib import Path
 
-PLIK_USTAWIEN = Path(__file__).resolve().parent / "settings.json"
-KLUCZ_IMAGEMAGICK = "imagemagick_path"
-IMAGEMAGICK_DOMYSLNA_WINDOWS = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
+SETTINGS_FILE = Path(__file__).resolve().parent / "settings.json"
+KEY_IMAGEMAGICK = "imagemagick_path"
+IMAGEMAGICK_DEFAULT_WINDOWS = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 
 
-def _domyslne_ustawienia():
-    domyslna = IMAGEMAGICK_DOMYSLNA_WINDOWS if platform.system() == "Windows" else ""
-    return {KLUCZ_IMAGEMAGICK: domyslna}
+def _default_settings():
+    default = IMAGEMAGICK_DEFAULT_WINDOWS if platform.system() == "Windows" else ""
+    return {KEY_IMAGEMAGICK: default}
 
 
-def wczytaj_ustawienia(plik=PLIK_USTAWIEN):
+def load_settings(file_path=SETTINGS_FILE):
     """Wczytuje settings.json; brakujący lub uszkodzony plik daje ustawienia domyślne."""
-    ustawienia = _domyslne_ustawienia()
+    settings = _default_settings()
     try:
-        dane = json.loads(Path(plik).read_text(encoding="utf-8-sig"))
+        data = json.loads(Path(file_path).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
-        return ustawienia
-    if isinstance(dane, dict):
-        ustawienia.update(dane)
-    return ustawienia
+        return settings
+    if isinstance(data, dict):
+        settings.update(data)
+    return settings
 
 
-def zapisz_ustawienia(ustawienia, plik=PLIK_USTAWIEN):
-    plik = Path(plik)
-    tymczasowy = plik.with_suffix(plik.suffix + ".tmp")
-    tymczasowy.write_text(json.dumps(ustawienia, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tymczasowy.replace(plik)
+def save_settings(settings, file_path=SETTINGS_FILE):
+    file_path = Path(file_path)
+    temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.replace(file_path)
 
 
-def zapewnij_plik_ustawien(plik=PLIK_USTAWIEN):
+def ensure_settings_file(file_path=SETTINGS_FILE):
     """Tworzy settings.json z wartościami domyślnymi (przeniesionymi z kodu), jeśli go nie ma."""
-    if not Path(plik).exists():
+    if not Path(file_path).exists():
         try:
-            zapisz_ustawienia(_domyslne_ustawienia(), plik)
+            save_settings(_default_settings(), file_path)
         except OSError:
             pass
 
 
-def zapisana_sciezka_imagemagick(plik=PLIK_USTAWIEN):
-    return str(wczytaj_ustawienia(plik).get(KLUCZ_IMAGEMAGICK) or "").strip()
+def saved_imagemagick_path(file_path=SETTINGS_FILE):
+    return str(load_settings(file_path).get(KEY_IMAGEMAGICK) or "").strip()
 
 
-def zapisz_sciezke_imagemagick(sciezka, plik=PLIK_USTAWIEN):
-    ustawienia = wczytaj_ustawienia(plik)
-    ustawienia[KLUCZ_IMAGEMAGICK] = str(sciezka).strip()
-    zapisz_ustawienia(ustawienia, plik)
+def save_imagemagick_path(path, file_path=SETTINGS_FILE):
+    settings = load_settings(file_path)
+    settings[KEY_IMAGEMAGICK] = str(path).strip()
+    save_settings(settings, file_path)
 
 
-def znajdz_imagemagick(plik=PLIK_USTAWIEN):
+def find_imagemagick(file_path=SETTINGS_FILE):
     """Ścieżka z settings.json (jeśli plik istnieje), w przeciwnym razie magick/convert z PATH."""
-    zapisana = zapisana_sciezka_imagemagick(plik)
-    if zapisana and os.path.isfile(zapisana):
-        return zapisana
-    for nazwa in ("magick", "convert"):
-        sciezka = shutil.which(nazwa)
-        if sciezka:
-            return sciezka
+    saved = saved_imagemagick_path(file_path)
+    if saved and os.path.isfile(saved):
+        return saved
+    for name in ("magick", "convert"):
+        path = shutil.which(name)
+        if path:
+            return path
     return None

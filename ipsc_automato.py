@@ -11,15 +11,14 @@ from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, Composit
 import moviepy.audio.fx.all as afx
 from moviepy.config import change_settings
 from timer_detect import zglos_wykrycie_timera
-from timer_trim import przytnij_wideo
-from dodatkowe_teksty import utworz_klipy_tekstowe
-from kolejnosc_torow import ROZDZIELCZOSCI, ROZDZIELCZOSC_DOMYSLNA
-from mapowanie_torow import przypisz_tory
-from migracja_plikow import przenies_stare_pliki
-from ustawienia_aplikacji import zapewnij_plik_ustawien
-from ustawienia_systemu import KATALOG_PROJEKTU, wybierz_czcionke, sprawdz_srodowisko, preset_dla_kodeku
-from ustawienia_aplikacji import znajdz_imagemagick
-from generuj_nazwy import generuj_tytul, przemianuj_plik
+from timer_trim import trim_video
+from additional_texts import create_text_clips
+from track_order import RESOLUTIONS, DEFAULT_RESOLUTION
+from track_mapping import assign_tracks
+from file_migration import move_old_files
+from app_settings import ensure_settings_file, find_imagemagick
+from system_settings import PROJECT_DIR, choose_font, check_environment, preset_for_codec
+from generate_names import generate_title, rename_file
 from video_cancellation import CancellableProgressLogger, GenerationCancelled
 
 # Pillow compatibility: some Pillow versions removed Image.ANTIALIAS constant.
@@ -36,12 +35,12 @@ if _PILImage is not None and not hasattr(_PILImage, 'ANTIALIAS'):
         _PILImage.ANTIALIAS = _PILImage.LANCZOS
 
 # Ścieżka do ImageMagick pochodzi z settings.json (klucz imagemagick_path); gdy jej tam nie ma, szukamy w PATH.
-zapewnij_plik_ustawien()
+ensure_settings_file()
 
 
 def zastosuj_imagemagick():
     """Odczytuje ścieżkę z settings.json i przekazuje ją MoviePy. Zwraca ścieżkę lub None."""
-    sciezka = znajdz_imagemagick()
+    sciezka = find_imagemagick()
     if sciezka:
         change_settings({"IMAGEMAGICK_BINARY": sciezka})
     return sciezka
@@ -52,14 +51,14 @@ _magick = zastosuj_imagemagick()
 # ===================================================================
 # KONFIGURACJA ŚCIEŻEK
 # ===================================================================
-FOLDER_WEJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Surowe")
-FOLDER_WYJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Gotowe")
-FOLDER_MUZYKI = os.path.join(KATALOG_PROJEKTU, "Muzyka")
-PLIK_Z_WYNIKAMI = os.path.join(KATALOG_PROJEKTU, "wyniki.txt")
-PLIK_Z_TEKSTAMI = os.path.join(KATALOG_PROJEKTU, "teksty_wideo.txt")
-PLIK_Z_TORAMI = os.path.join(KATALOG_PROJEKTU, "mapowanie_torow.txt")
-PLIK_OPISU_ZAWODOW = os.path.join(KATALOG_PROJEKTU, "opis_zawodow.txt")
-przenies_stare_pliki(KATALOG_PROJEKTU)
+FOLDER_WEJSCIOWY = os.path.join(PROJECT_DIR, "Surowe")
+FOLDER_WYJSCIOWY = os.path.join(PROJECT_DIR, "Gotowe")
+FOLDER_MUZYKI = os.path.join(PROJECT_DIR, "Muzyka")
+PLIK_Z_WYNIKAMI = os.path.join(PROJECT_DIR, "wyniki.txt")
+PLIK_Z_TEKSTAMI = os.path.join(PROJECT_DIR, "teksty_wideo.txt")
+PLIK_Z_TORAMI = os.path.join(PROJECT_DIR, "mapowanie_torow.txt")
+PLIK_OPISU_ZAWODOW = os.path.join(PROJECT_DIR, "opis_zawodow.txt")
+move_old_files(PROJECT_DIR)
 
 
 @dataclass(frozen=True)
@@ -72,6 +71,7 @@ class KonfiguracjaSciezek:
     plik_z_torami: Path = Path(PLIK_Z_TORAMI)
     plik_opisu_zawodow: Path = Path(PLIK_OPISU_ZAWODOW)
     domyslna_orientacja: str = "V"
+    dodaj_napisy: bool = True
 
 # ===================================================================
 # FUNKCJE POMOCNICZE
@@ -123,14 +123,17 @@ def uruchom_automatyzacje(
         if cancel_event and cancel_event.is_set():
             raise GenerationCancelled("Generowanie przerwano przez użytkownika.")
 
-    srodowisko_ok, kodek = sprawdz_srodowisko(zastosuj_imagemagick(), raportuj)
+    srodowisko_ok, kodek = check_environment(zastosuj_imagemagick(), raportuj)
     if not srodowisko_ok:
         raportuj("Nie można rozpocząć montażu: sprawdź wymagane narzędzia systemowe.")
         return False
 
     os.makedirs(konfiguracja.folder_wyjsciowy, exist_ok=True)
     
-    dane_torow = czytaj_wyniki_z_pliku(str(konfiguracja.plik_z_wynikami))
+    if konfiguracja.dodaj_napisy or konfiguracja.plik_z_wynikami.is_file():
+        dane_torow = czytaj_wyniki_z_pliku(str(konfiguracja.plik_z_wynikami))
+    else:
+        dane_torow = {}
     muzyka_pliki = [m for m in os.listdir(konfiguracja.folder_muzyki) if m.lower().endswith('.mp3')]
     
     wideo_pliki = [
@@ -138,10 +141,10 @@ def uruchom_automatyzacje(
         if w.lower().endswith(('.mp4', '.mov')) and "TEMP_MPY_" not in w.upper()
     ]
     wideo_pliki.sort() 
-    przypisane_tory = przypisz_tory(
+    przypisane_tory = assign_tracks(
         wideo_pliki,
         str(konfiguracja.plik_z_torami),
-        ROZDZIELCZOSCI.get(konfiguracja.domyslna_orientacja, ROZDZIELCZOSC_DOMYSLNA),
+        RESOLUTIONS.get(konfiguracja.domyslna_orientacja, DEFAULT_RESOLUTION),
     )
     if not przypisane_tory:
         raportuj(f"Nie znaleziono filmów MP4/MOV w folderze: {konfiguracja.folder_wejsciowy}")
@@ -158,13 +161,14 @@ def uruchom_automatyzacje(
 
         raportuj(f"\n>>> Przetwarzanie: {nazwa_pliku} jako TOR {nr_toru}")
         
-        if nr_toru not in dane_torow:
+        dane = dane_torow.get(nr_toru)
+        if dane is None and konfiguracja.dodaj_napisy:
             raportuj(f"Pominięto {nazwa_pliku}: brak wyników dla toru {nr_toru}.")
             if progress_callback:
                 progress_callback(indeks, len(przypisane_tory), nazwa_pliku, "skipped")
             continue
             
-        dane = dane_torow[nr_toru]
+        czas_przebiegu = dane["czas"] if dane else None
         
         sciezka_wej = os.path.join(konfiguracja.folder_wejsciowy, nazwa_pliku)
         sciezka_wyj = os.path.join(konfiguracja.folder_wyjsciowy, f"Gotowe_Stage_{nr_toru}.mp4")
@@ -185,7 +189,7 @@ def uruchom_automatyzacje(
             sprawdz_przerwanie()
             video = VideoFileClip(sciezka_wej)
             sprawdz_przerwanie()
-            video = przytnij_wideo(video, sygnaly, dane["czas"], raportuj)
+            video = trim_video(video, sygnaly, czas_przebiegu, raportuj)
 
             nowy_czas_trwania = video.duration
             raportuj(f"Czas wideo: {nowy_czas_trwania:.2f}s")
@@ -211,22 +215,26 @@ def uruchom_automatyzacje(
                 video = video.set_audio(ziksowane_audio)
             
             # --- NAPISY ---
-            tekst_wyswietlany = (f"STAGE {nr_toru} | Miejsce: {dane['miejsce']} ({dane['procent']})\n"
-                                 f"Czas: {dane['czas']}s | HF: {dane['hf']} | Pkt: {dane['punkty']}")
+            warstwy_napisow = []
+            if konfiguracja.dodaj_napisy:
+                tekst_wyswietlany = (f"STAGE {nr_toru} | Miejsce: {dane['miejsce']} ({dane['procent']})\n"
+                                     f"Czas: {dane['czas']}s | HF: {dane['hf']} | Pkt: {dane['punkty']}")
             
-            napis = TextClip(tekst_wyswietlany, fontsize=55, color='white', 
-                             font=wybierz_czcionke(), stroke_color='black', stroke_width=2.5, align='center')
+                napis = TextClip(tekst_wyswietlany, fontsize=55, color='white', 
+                                 font=choose_font(), stroke_color='black', stroke_width=2.5, align='center')
             
-            # Napis wyrównany do dołu
-            napis = napis.set_position(('center', 0.85), relative=True).set_duration(nowy_czas_trwania)
+                # Napis wyrównany do dołu
+                napis = napis.set_position(('center', 0.85), relative=True).set_duration(nowy_czas_trwania)
+                warstwy_napisow = [napis]
             
             # --- ZMIANA ROZDZIELCZOŚCI (H = 1920x1080, V/domyślnie = 1080x1920) ---
             video = video.resize(newsize=rozdzielczosc)
             # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
-            teksty_gorne = utworz_klipy_tekstowe(
-                str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
-            )
-            wideo_koncowe = CompositeVideoClip([video, napis] + teksty_gorne, size=rozdzielczosc).set_fps(30)
+            if konfiguracja.dodaj_napisy:
+                warstwy_napisow += create_text_clips(
+                    str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
+                )
+            wideo_koncowe = CompositeVideoClip([video, *warstwy_napisow], size=rozdzielczosc).set_fps(30)
             sprawdz_przerwanie()
             
             # --- RENDEROWANIE Z ZACHOWANIEM KOLORÓW I BEZ OBROTÓW ---
@@ -237,7 +245,7 @@ def uruchom_automatyzacje(
                 codec=kodek, 
                 audio_codec="aac",
                 bitrate="8000k",    
-                preset=preset_dla_kodeku(kodek),
+                preset=preset_for_codec(kodek),
                 ffmpeg_params=['-pix_fmt', 'yuv420p'],  # Gwarantuje poprawne kolory i odtwarzanie w Windows
                 temp_audiofile=str(sciezka_audio_tymczasowego),
                 logger=CancellableProgressLogger(cancel_event or Event()),
@@ -245,8 +253,8 @@ def uruchom_automatyzacje(
             
             sprawdz_przerwanie()
             os.replace(sciezka_tymczasowa, sciezka_wyj)
-            tytul = generuj_tytul(sciezka_wyj, konfiguracja.plik_opisu_zawodow)
-            sciezka_wyj = przemianuj_plik(sciezka_wyj, tytul)
+            tytul = generate_title(sciezka_wyj, konfiguracja.plik_opisu_zawodow)
+            sciezka_wyj = rename_file(sciezka_wyj, tytul)
             raportuj(f"Nadano nazwę: {sciezka_wyj.name}")
             raportuj("Zakończono sukcesem!\n")
             if progress_callback:

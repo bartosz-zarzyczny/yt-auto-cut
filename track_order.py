@@ -1,23 +1,23 @@
 import os
 
-ROZDZIELCZOSC_DOMYSLNA = (1080, 1920)
-ROZDZIELCZOSCI = {"H": (1920, 1080), "V": (1080, 1920)}
+DEFAULT_RESOLUTION = (1080, 1920)
+RESOLUTIONS = {"H": (1920, 1080), "V": (1080, 1920)}
 
 
-def czytaj_kolejnosc_torow(sciezka_do_pliku, domyslna=ROZDZIELCZOSC_DOMYSLNA):
+def read_track_order(file_path, default=DEFAULT_RESOLUTION):
     """Zwraca listę (nr_toru, (szer, wys)) w kolejności z mapowanie_torow.txt.
     Format linii: "numer" lub "numer;H" / "numer;V". Bez litery używana jest rozdzielczość `domyslna`."""
-    if not os.path.exists(sciezka_do_pliku):
-        print(f"Brak pliku z kolejnością torów: {sciezka_do_pliku}")
+    if not os.path.exists(file_path):
+        print(f"Brak pliku z kolejnością torów: {file_path}")
         return []
 
-    wynik = []
-    with open(sciezka_do_pliku, 'r', encoding='utf-8-sig') as f:
-        for linia in f:
-            linia = linia.strip()
-            if not linia:
+    result = []
+    with open(file_path, 'r', encoding='utf-8-sig') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
                 continue
-            nr_toru, _, orientacja = linia.partition(";")
-            rozdzielczosc = ROZDZIELCZOSCI.get(orientacja.strip().upper(), domyslna)
-            wynik.append((nr_toru.strip(), rozdzielczosc))
-    return wynik
+            track_no, _, orientation = line.partition(";")
+            resolution = RESOLUTIONS.get(orientation.strip().upper(), default)
+            result.append((track_no.strip(), resolution))
+    return result

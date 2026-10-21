@@ -4,8 +4,8 @@ from pathlib import Path
 try:
     import PySide6.QtWidgets  # noqa: F401
 except ImportError:
-    from sprawdzanie_systemu import pokaz_raport_bez_qt
-    pokaz_raport_bez_qt()
+    from system_check import show_report_without_qt
+    show_report_without_qt()
     sys.exit(1)
 
 from datetime import time as dt_time
@@ -40,20 +40,20 @@ from PySide6.QtWidgets import (
 )
 
 from dataclasses import dataclass
-from migracja_plikow import popraw_sciezke, przenies_stare_pliki
-from ustawienia_aplikacji import (
-    PLIK_USTAWIEN,
-    zapewnij_plik_ustawien,
-    zapisana_sciezka_imagemagick,
-    zapisz_sciezke_imagemagick,
+from file_migration import fix_path, move_old_files
+from app_settings import (
+    SETTINGS_FILE,
+    ensure_settings_file,
+    saved_imagemagick_path,
+    save_imagemagick_path,
 )
-from sprawdzanie_systemu import formatuj_html, uruchom_test_systemu
+from system_check import format_html, run_system_check
 
-PROJEKT = Path(__file__).resolve().parent
-DNI_TYGODNIA = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"]
-GODZINY_PUBLIKACJI = [f"{g:02d}:{m:02d}" for g in range(24) for m in range(0, 60, 15)]
-przenies_stare_pliki(PROJEKT)
-zapewnij_plik_ustawien()
+PROJECT_DIR = Path(__file__).resolve().parent
+WEEKDAY_NAMES = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"]
+PUBLISH_TIMES = [f"{g:02d}:{m:02d}" for g in range(24) for m in range(0, 60, 15)]
+move_old_files(PROJECT_DIR)
+ensure_settings_file()
 
 try:
     from ipsc_automato import (
@@ -67,17 +67,17 @@ try:
         KonfiguracjaSciezek,
         uruchom_automatyzacje,
     )
-    BLAD_MONTAZU = ""
-except Exception as blad_importu:
+    ASSEMBLY_ERROR = ""
+except Exception as import_error:
     # Brak biblioteki/programu nie może uniemożliwić uruchomienia okna z zakładką Pomoc.
-    BLAD_MONTAZU = f"{type(blad_importu).__name__}: {blad_importu}"
-    FOLDER_WEJSCIOWY = str(PROJEKT / "Surowe")
-    FOLDER_WYJSCIOWY = str(PROJEKT / "Gotowe")
-    FOLDER_MUZYKI = str(PROJEKT / "Muzyka")
-    PLIK_Z_WYNIKAMI = str(PROJEKT / "wyniki.txt")
-    PLIK_Z_TEKSTAMI = str(PROJEKT / "teksty_wideo.txt")
-    PLIK_Z_TORAMI = str(PROJEKT / "mapowanie_torow.txt")
-    PLIK_OPISU_ZAWODOW = str(PROJEKT / "opis_zawodow.txt")
+    ASSEMBLY_ERROR = f"{type(import_error).__name__}: {import_error}"
+    FOLDER_WEJSCIOWY = str(PROJECT_DIR / "Surowe")
+    FOLDER_WYJSCIOWY = str(PROJECT_DIR / "Gotowe")
+    FOLDER_MUZYKI = str(PROJECT_DIR / "Muzyka")
+    PLIK_Z_WYNIKAMI = str(PROJECT_DIR / "wyniki.txt")
+    PLIK_Z_TEKSTAMI = str(PROJECT_DIR / "teksty_wideo.txt")
+    PLIK_Z_TORAMI = str(PROJECT_DIR / "mapowanie_torow.txt")
+    PLIK_OPISU_ZAWODOW = str(PROJECT_DIR / "opis_zawodow.txt")
     uruchom_automatyzacje = None
 
     @dataclass(frozen=True)
@@ -90,16 +90,17 @@ except Exception as blad_importu:
         plik_z_torami: Path = Path(PLIK_Z_TORAMI)
         plik_opisu_zawodow: Path = Path(PLIK_OPISU_ZAWODOW)
         domyslna_orientacja: str = "V"
+        dodaj_napisy: bool = True
 
 
-class MontazWorker(QObject):
+class AssemblyWorker(QObject):
     log = Signal(str)
     progress = Signal(int, int, str, str)
     completed = Signal(bool, str)
 
-    def __init__(self, konfiguracja: KonfiguracjaSciezek, cancel_event: Event):
+    def __init__(self, config: KonfiguracjaSciezek, cancel_event: Event):
         super().__init__()
-        self.konfiguracja = konfiguracja
+        self.config = config
         self.cancel_event = cancel_event
         self.error_count = 0
         self.completed_count = 0
@@ -107,25 +108,25 @@ class MontazWorker(QObject):
 
     def run(self):
         try:
-            sukces = uruchom_automatyzacje(
-                konfiguracja=self.konfiguracja,
+            success = uruchom_automatyzacje(
+                konfiguracja=self.config,
                 log_callback=self.log.emit,
-                progress_callback=self._raportuj_postep,
+                progress_callback=self._report_progress,
                 cancel_event=self.cancel_event,
             )
-        except Exception as blad:
-            self.log.emit(f"BŁĄD: {blad}")
-            self.completed.emit(False, str(blad))
+        except Exception as error:
+            self.log.emit(f"BŁĄD: {error}")
+            self.completed.emit(False, str(error))
             return
 
-        if not sukces and self.cancel_event.is_set():
+        if not success and self.cancel_event.is_set():
             self.completed.emit(False, "Generowanie przerwano przez użytkownika.")
         elif self.skipped_count and not self.completed_count and not self.error_count:
             self.completed.emit(
                 False,
                 "Wszystkie nagrania pominięto: sprawdź, czy wyniki zawierają przypisane tory.",
             )
-        elif not sukces or self.error_count:
+        elif not success or self.error_count:
             self.completed.emit(
                 False,
                 "Montaż nie powiódł się. Sprawdź log i wymagania systemowe."
@@ -135,14 +136,14 @@ class MontazWorker(QObject):
         else:
             self.completed.emit(True, "Montaż zakończony.")
 
-    def _raportuj_postep(self, indeks: int, razem: int, nazwa: str, status: str):
+    def _report_progress(self, index: int, total: int, name: str, status: str):
         if status == "error":
             self.error_count += 1
         elif status == "done":
             self.completed_count += 1
         elif status == "skipped":
             self.skipped_count += 1
-        self.progress.emit(indeks, razem, nazwa, status)
+        self.progress.emit(index, total, name, status)
 
 
 class YouTubeWorker(QObject):
@@ -152,49 +153,49 @@ class YouTubeWorker(QObject):
     def __init__(
         self,
         folder: Path,
-        opis: Path,
-        publikuj: bool,
+        description_file: Path,
+        publish: bool,
         cancel_event: Event,
-        godziny: Optional[Dict[int, dt_time]] = None,
-        od_razu: bool = False,
+        schedule: Optional[Dict[int, dt_time]] = None,
+        publish_now: bool = False,
     ):
         super().__init__()
         self.folder = folder
-        self.opis = opis
-        self.publikuj = publikuj
+        self.description_file = description_file
+        self.publish = publish
         self.cancel_event = cancel_event
-        self.godziny = godziny
-        self.od_razu = od_razu
+        self.schedule = schedule
+        self.publish_now = publish_now
 
     def run(self):
         try:
             import youtube_upload
 
-            filmy = sorted(
+            videos = sorted(
                 (p for p in self.folder.iterdir() if p.suffix.lower() == ".mp4"),
                 key=lambda p: p.name.casefold(),
             )
-            if not filmy:
+            if not videos:
                 self.completed.emit(False, f"Brak plików MP4 w folderze: {self.folder}")
                 return
-            self.log.emit(f"[YT] Znaleziono filmów: {len(filmy)}")
-            youtube_upload.wyslij_filmy(
-                filmy,
-                self.publikuj,
-                plik_opisu=self.opis,
+            self.log.emit(f"[YT] Znaleziono filmów: {len(videos)}")
+            youtube_upload.upload_videos(
+                videos,
+                self.publish,
+                description_file=self.description_file,
                 log=self.log.emit,
                 cancel_event=self.cancel_event,
-                godziny=self.godziny,
-                od_razu=self.od_razu,
+                hours=self.schedule,
+                immediate=self.publish_now,
             )
-        except Exception as blad:
-            if type(blad).__name__ == "WysylaniePrzerwane":
+        except Exception as error:
+            if type(error).__name__ == "UploadCancelled":
                 self.completed.emit(False, "Wysyłanie przerwano przez użytkownika.")
             else:
-                self.log.emit(f"[YT] BŁĄD: {blad}")
-                self.completed.emit(False, f"Wysyłanie nie powiodło się: {blad}")
+                self.log.emit(f"[YT] BŁĄD: {error}")
+                self.completed.emit(False, f"Wysyłanie nie powiodło się: {error}")
             return
-        self.completed.emit(True, "Wysyłanie zakończone." if self.publikuj else "Podgląd zakończony.")
+        self.completed.emit(True, "Wysyłanie zakończone." if self.publish else "Podgląd zakończony.")
 
 
 class SystemCheckWorker(QObject):
@@ -202,14 +203,14 @@ class SystemCheckWorker(QObject):
 
     def run(self):
         try:
-            wyniki = uruchom_test_systemu()
-            self.finished.emit(formatuj_html(wyniki), any(not w.ok for w in wyniki))
-        except Exception as blad:
-            self.finished.emit(f"<p style='color:#ff7b7b'>Test systemu nie powiódł się: {blad}</p>", True)
+            results = run_system_check()
+            self.finished.emit(format_html(results), any(not w.ok for w in results))
+        except Exception as error:
+            self.finished.emit(f"<p style='color:#ff7b7b'>Test systemu nie powiódł się: {error}</p>", True)
 
 
 class MainWindow(QMainWindow):
-    SCIEZKI = (
+    PATHS = (
         ("folder_wejsciowy", "Nagrania źródłowe", "dir"),
         ("folder_wyjsciowy", "Gotowe filmy", "dir"),
         ("folder_muzyki", "Muzyka", "dir"),
@@ -218,7 +219,8 @@ class MainWindow(QMainWindow):
         ("plik_z_tekstami", "Teksty wideo", "file"),
         ("plik_opisu_zawodow", "Opis zawodów", "file"),
     )
-    EDYTORY = (
+    SUBTITLE_PATH_KEYS = ("plik_z_wynikami", "plik_z_tekstami")
+    EDITORS = (
         ("plik_z_tekstami", "Teksty wideo"),
         ("plik_opisu_zawodow", "Opis zawodów"),
         ("plik_z_torami", "Mapowanie torów"),
@@ -233,7 +235,7 @@ class MainWindow(QMainWindow):
         self.editor_status: Dict[str, QLabel] = {}
         self._dirty_editors = set()
         self.worker_thread: Optional[QThread] = None
-        self.worker: Optional[MontazWorker] = None
+        self.worker: Optional[AssemblyWorker] = None
         self.cancel_event: Optional[Event] = None
         self.yt_thread: Optional[QThread] = None
         self.yt_worker: Optional[YouTubeWorker] = None
@@ -241,47 +243,47 @@ class MainWindow(QMainWindow):
         self.job_complete = False
         self.test_thread: Optional[QThread] = None
         self.test_worker: Optional[SystemCheckWorker] = None
-        self._test_automatyczny = False
+        self._test_automatic = False
         self.setWindowTitle("IPSC Video Automato")
         self.resize(1120, 850)
         self.setMinimumSize(860, 680)
-        self._zbuduj_interfejs()
-        self._wczytaj_ustawienia()
-        self._wczytaj_startowe_pliki()
+        self._build_ui()
+        self._load_settings()
+        self._load_startup_files()
 
-    def _zbuduj_interfejs(self):
+    def _build_ui(self):
         central = QWidget(self)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(30, 26, 30, 28)
         layout.setSpacing(18)
 
-        naglowek = QHBoxLayout()
+        header = QHBoxLayout()
         logo = QLabel("IPSC")
         logo.setObjectName("brand")
-        nazwa = QLabel("VIDEO AUTOMATO")
-        nazwa.setObjectName("brandTitle")
-        naglowek.addWidget(logo)
-        naglowek.addWidget(nazwa)
-        naglowek.addStretch(1)
-        wersja = QLabel("WORKSPACE  /  2026")
-        wersja.setObjectName("eyebrow")
-        naglowek.addWidget(wersja)
-        layout.addLayout(naglowek)
+        name = QLabel("VIDEO AUTOMATO")
+        name.setObjectName("brandTitle")
+        header.addWidget(logo)
+        header.addWidget(name)
+        header.addStretch(1)
+        version = QLabel("WORKSPACE  /  2026")
+        version.setObjectName("eyebrow")
+        header.addWidget(version)
+        layout.addLayout(header)
 
-        opis = QLabel("Produkcja i organizacja materiałów wideo z zawodów")
-        opis.setObjectName("subtitle")
-        layout.addWidget(opis)
+        description = QLabel("Produkcja i organizacja materiałów wideo z zawodów")
+        description.setObjectName("subtitle")
+        layout.addWidget(description)
 
         self.tabs = QTabWidget()
-        self.tab_glowna = self._zbuduj_glowna()
-        self.tab_zawody = self._zbuduj_zawody()
-        self.tab_konfiguracja = self._zbuduj_konfiguracje()
-        self.tabs.addTab(self.tab_glowna, "  Główna  ")
-        self.tabs.addTab(self.tab_zawody, "  Zawody  ")
-        self.tabs.addTab(self.tab_konfiguracja, "  Konfiguracja  ")
-        self.tabs.addTab(self._zbuduj_youtube(), "  YouTube  ")
-        self.tab_pomoc = self._zbuduj_pomoc()
-        self.tabs.addTab(self.tab_pomoc, "  Pomoc  ")
+        self.tab_main = self._build_main_tab()
+        self.tab_competition = self._build_competition_tab()
+        self.tab_config = self._build_config_tab()
+        self.tabs.addTab(self.tab_main, "  Główna  ")
+        self.tabs.addTab(self.tab_competition, "  Zawody  ")
+        self.tabs.addTab(self.tab_config, "  Konfiguracja  ")
+        self.tabs.addTab(self._build_youtube_tab(), "  YouTube  ")
+        self.tab_help = self._build_help_tab()
+        self.tabs.addTab(self.tab_help, "  Pomoc  ")
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
         self.setStyleSheet(
@@ -332,35 +334,41 @@ class MainWindow(QMainWindow):
             """
         )
 
-    def _zbuduj_glowna(self):
-        strona = QWidget()
-        layout = QVBoxLayout(strona)
+    def _build_main_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(12)
 
-        sciezki = QGroupBox("Projekt wideo")
-        sciezki_layout = QVBoxLayout(sciezki)
-        sciezki_layout.setSpacing(12)
-        self._dodaj_pole_sciezki(sciezki_layout, "folder_wejsciowy", "Nagrania źródłowe", "dir")
-        self._dodaj_pole_sciezki(sciezki_layout, "folder_wyjsciowy", "Gotowe filmy", "dir")
-        layout.addWidget(sciezki)
+        paths = QGroupBox("Projekt wideo")
+        paths_layout = QVBoxLayout(paths)
+        paths_layout.setSpacing(12)
+        self._add_path_field(paths_layout, "folder_wejsciowy", "Nagrania źródłowe", "dir")
+        self._add_path_field(paths_layout, "folder_wyjsciowy", "Gotowe filmy", "dir")
+        self.subtitles_check = QCheckBox("Czy dodać napisy")
+        self.subtitles_check.setChecked(
+            str(self.settings.value("dodaj_napisy", "false")).lower() == "true"
+        )
+        self.subtitles_check.toggled.connect(self._remember_subtitles)
+        layout.addWidget(self.subtitles_check)
+        layout.addWidget(paths)
 
-        pasek = QHBoxLayout()
+        bar = QHBoxLayout()
         self.status = QLabel("Gotowy do pracy")
         self.status.setObjectName("muted")
         self.start_button = QPushButton("▶  Rozpocznij montaż")
         self.start_button.setObjectName("primary")
         self.start_button.setMinimumHeight(44)
-        self.start_button.clicked.connect(self._rozpocznij)
+        self.start_button.clicked.connect(self._start)
         self.cancel_button = QPushButton("Przerwij generowanie")
         self.cancel_button.setObjectName("danger")
         self.cancel_button.setMinimumHeight(44)
         self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self._przerwij)
-        pasek.addWidget(self.status, 1)
-        pasek.addWidget(self.start_button)
-        pasek.addWidget(self.cancel_button)
-        layout.addLayout(pasek)
+        self.cancel_button.clicked.connect(self._cancel)
+        bar.addWidget(self.status, 1)
+        bar.addWidget(self.start_button)
+        bar.addWidget(self.cancel_button)
+        layout.addLayout(bar)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
@@ -375,80 +383,80 @@ class MainWindow(QMainWindow):
         self.log_view.setPlaceholderText("Tutaj pojawią się postęp montażu i komunikaty aplikacji.")
         log_layout.addWidget(self.log_view)
         layout.addWidget(log_group, 1)
-        return strona
+        return page
 
-    def _zbuduj_konfiguracje(self):
-        strona = QWidget()
-        layout = QVBoxLayout(strona)
+    def _build_config_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(10)
-        opis = QLabel("Folder z podkładami oraz treści wykorzystywane przy generowaniu filmów.")
-        opis.setObjectName("muted")
-        layout.addWidget(opis)
+        description = QLabel("Folder z podkładami oraz treści wykorzystywane przy generowaniu filmów.")
+        description.setObjectName("muted")
+        layout.addWidget(description)
 
-        muzyka = QGroupBox("Biblioteka muzyki")
-        muzyka_layout = QVBoxLayout(muzyka)
-        self._dodaj_pole_sciezki(muzyka_layout, "folder_muzyki", "Folder z muzyką", "dir")
-        layout.addWidget(muzyka)
-        layout.addWidget(self._zbuduj_imagemagick())
-        layout.addWidget(self._stworz_edytor("plik_z_tekstami", "Teksty wideo"))
-        layout.addWidget(self._stworz_edytor("plik_opisu_zawodow", "Opis zawodów"))
+        music = QGroupBox("Biblioteka muzyki")
+        music_layout = QVBoxLayout(music)
+        self._add_path_field(music_layout, "folder_muzyki", "Folder z muzyką", "dir")
+        layout.addWidget(music)
+        layout.addWidget(self._build_imagemagick())
+        layout.addWidget(self._create_editor("plik_z_tekstami", "Teksty wideo"))
+        layout.addWidget(self._create_editor("plik_opisu_zawodow", "Opis zawodów"))
         layout.addStretch(1)
-        return strona
+        return page
 
-    def _zbuduj_youtube(self):
-        strona = QWidget()
-        layout = QVBoxLayout(strona)
+    def _build_youtube_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(12)
-        opis = QLabel("Wysyłanie gotowych filmów (Shorts) na YouTube z planowaniem publikacji.")
-        opis.setObjectName("muted")
-        layout.addWidget(opis)
-        layout.addWidget(self._zbuduj_publikacje())
+        description = QLabel("Wysyłanie gotowych filmów (Shorts) na YouTube z planowaniem publikacji.")
+        description.setObjectName("muted")
+        layout.addWidget(description)
+        layout.addWidget(self._build_publish_section())
 
-        grupa = QGroupBox("Folder z filmami do wysłania")
-        grupa_layout = QVBoxLayout(grupa)
-        self.yt_ten_sam_folder = QCheckBox("Taki sam jak „Gotowe filmy” (zakładka Główna)")
-        self.yt_ten_sam_folder.setChecked(
+        group = QGroupBox("Folder z filmami do wysłania")
+        group_layout = QVBoxLayout(group)
+        self.yt_same_folder = QCheckBox("Taki sam jak „Gotowe filmy” (zakładka Główna)")
+        self.yt_same_folder.setChecked(
             str(self.settings.value("yt_ten_sam_folder", "true")).lower() == "true"
         )
-        self.yt_ten_sam_folder.toggled.connect(self._zmien_tryb_folderu_yt)
-        grupa_layout.addWidget(self.yt_ten_sam_folder)
-        wiersz = QHBoxLayout()
-        etykieta = QLabel("Folder YouTube")
-        etykieta.setMinimumWidth(150)
+        self.yt_same_folder.toggled.connect(self._on_yt_folder_mode_changed)
+        group_layout.addWidget(self.yt_same_folder)
+        row = QHBoxLayout()
+        label = QLabel("Folder YouTube")
+        label.setMinimumWidth(150)
         self.yt_folder = QLineEdit(str(self.settings.value("folder_youtube", "")))
         self.yt_folder.setPlaceholderText("Wskaż folder z plikami MP4…")
         self.yt_folder.editingFinished.connect(
             lambda: self.settings.setValue("folder_youtube", self.yt_folder.text().strip())
         )
-        self.yt_przegladaj = QPushButton("Przeglądaj…")
-        self.yt_przegladaj.clicked.connect(self._wybierz_folder_yt)
-        wiersz.addWidget(etykieta)
-        wiersz.addWidget(self.yt_folder, 1)
-        wiersz.addWidget(self.yt_przegladaj)
-        grupa_layout.addLayout(wiersz)
-        layout.addWidget(grupa)
+        self.yt_browse_button = QPushButton("Przeglądaj…")
+        self.yt_browse_button.clicked.connect(self._choose_yt_folder)
+        row.addWidget(label)
+        row.addWidget(self.yt_folder, 1)
+        row.addWidget(self.yt_browse_button)
+        group_layout.addLayout(row)
+        layout.addWidget(group)
 
-        self.yt_podglad = QCheckBox("Tylko podgląd (pokaż tytuły i terminy, bez wysyłania)")
-        layout.addWidget(self.yt_podglad)
+        self.yt_preview_only = QCheckBox("Tylko podgląd (pokaż tytuły i terminy, bez wysyłania)")
+        layout.addWidget(self.yt_preview_only)
 
-        pasek = QHBoxLayout()
+        bar = QHBoxLayout()
         self.yt_status = QLabel("Gotowy do wysyłania")
         self.yt_status.setObjectName("muted")
         self.yt_start = QPushButton("⬆  Wyślij do YT")
         self.yt_start.setObjectName("primary")
         self.yt_start.setMinimumHeight(44)
-        self.yt_start.clicked.connect(self._wyslij_do_yt)
+        self.yt_start.clicked.connect(self._send_to_yt)
         self.yt_cancel = QPushButton("Przerwij wysyłanie")
         self.yt_cancel.setObjectName("danger")
         self.yt_cancel.setMinimumHeight(44)
         self.yt_cancel.setEnabled(False)
-        self.yt_cancel.clicked.connect(self._przerwij_yt)
-        pasek.addWidget(self.yt_status, 1)
-        pasek.addWidget(self.yt_start)
-        pasek.addWidget(self.yt_cancel)
-        layout.addLayout(pasek)
+        self.yt_cancel.clicked.connect(self._cancel_yt)
+        bar.addWidget(self.yt_status, 1)
+        bar.addWidget(self.yt_start)
+        bar.addWidget(self.yt_cancel)
+        layout.addLayout(bar)
 
         log_group = QGroupBox("Dziennik wysyłania")
         log_layout = QVBoxLayout(log_group)
@@ -458,145 +466,145 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self.yt_log)
         layout.addWidget(log_group, 1)
 
-        self.fields["folder_wyjsciowy"].textChanged.connect(self._odswiez_folder_yt)
-        self._zmien_tryb_folderu_yt()
+        self.fields["folder_wyjsciowy"].textChanged.connect(self._refresh_yt_folder)
+        self._on_yt_folder_mode_changed()
         self.yt_log.setMinimumHeight(140)
-        przewijanie = QScrollArea()
-        przewijanie.setWidgetResizable(True)
-        przewijanie.setFrameShape(QFrame.NoFrame)
-        przewijanie.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        przewijanie.setWidget(strona)
-        strona.setObjectName("scrollPage")
-        strona.setStyleSheet("QWidget#scrollPage { background: transparent; }")
-        return przewijanie
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        page.setObjectName("scrollPage")
+        page.setStyleSheet("QWidget#scrollPage { background: transparent; }")
+        return scroll
 
-    def _zmien_tryb_folderu_yt(self, checked: bool = False):
+    def _on_yt_folder_mode_changed(self, checked: bool = False):
         del checked
-        wspolny = self.yt_ten_sam_folder.isChecked()
-        self.settings.setValue("yt_ten_sam_folder", "true" if wspolny else "false")
-        self.yt_folder.setEnabled(not wspolny)
-        self.yt_przegladaj.setEnabled(not wspolny)
-        self._odswiez_folder_yt()
+        shared = self.yt_same_folder.isChecked()
+        self.settings.setValue("yt_ten_sam_folder", "true" if shared else "false")
+        self.yt_folder.setEnabled(not shared)
+        self.yt_browse_button.setEnabled(not shared)
+        self._refresh_yt_folder()
 
-    def _odswiez_folder_yt(self, *_):
-        if self.yt_ten_sam_folder.isChecked():
+    def _refresh_yt_folder(self, *_):
+        if self.yt_same_folder.isChecked():
             self.yt_folder.setText(self.fields["folder_wyjsciowy"].text().strip())
 
-    def _zbuduj_publikacje(self):
-        grupa = QGroupBox("PUBLIKACJA")
-        layout = QVBoxLayout(grupa)
-        self.yt_tryb_plan = QRadioButton("Zaplanuj publikację")
-        self.yt_tryb_od_razu = QRadioButton("Publikuj wszystkie od razu")
-        od_razu = str(self.settings.value("yt_od_razu", "false")).lower() == "true"
-        self.yt_tryb_od_razu.setChecked(od_razu)
-        self.yt_tryb_plan.setChecked(not od_razu)
-        grupa_radio = QButtonGroup(self)
-        grupa_radio.addButton(self.yt_tryb_plan)
-        grupa_radio.addButton(self.yt_tryb_od_razu)
-        layout.addWidget(self.yt_tryb_plan)
+    def _build_publish_section(self):
+        group = QGroupBox("PUBLIKACJA")
+        layout = QVBoxLayout(group)
+        self.yt_mode_schedule = QRadioButton("Zaplanuj publikację")
+        self.yt_mode_publish_now = QRadioButton("Publikuj wszystkie od razu")
+        publish_now = str(self.settings.value("yt_od_razu", "false")).lower() == "true"
+        self.yt_mode_publish_now.setChecked(publish_now)
+        self.yt_mode_schedule.setChecked(not publish_now)
+        radio_group = QButtonGroup(self)
+        radio_group.addButton(self.yt_mode_schedule)
+        radio_group.addButton(self.yt_mode_publish_now)
+        layout.addWidget(self.yt_mode_schedule)
 
-        self.yt_wlasny_plan = QCheckBox("Własne dni i godziny publikacji (inaczej: pn–pt 7:30, sob–nd 10:00)")
-        self.yt_wlasny_plan.setChecked(str(self.settings.value("yt_wlasny_plan", "false")).lower() == "true")
-        layout.addWidget(self.yt_wlasny_plan)
+        self.yt_custom_schedule = QCheckBox("Własne dni i godziny publikacji (inaczej: pn–pt 7:30, sob–nd 10:00)")
+        self.yt_custom_schedule.setChecked(str(self.settings.value("yt_wlasny_plan", "false")).lower() == "true")
+        layout.addWidget(self.yt_custom_schedule)
 
-        domyslne = {d: "07:30" if d < 5 else "10:00" for d in range(7)}
-        siatka = QGridLayout()
-        siatka.setHorizontalSpacing(10)
-        siatka.setVerticalSpacing(6)
-        siatka.setContentsMargins(0, 6, 0, 6)
-        self.yt_dni: Dict[int, tuple] = {}
-        for numer, nazwa in enumerate(DNI_TYGODNIA):
-            checkbox = QCheckBox(nazwa)
+        defaults = {d: "07:30" if d < 5 else "10:00" for d in range(7)}
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+        grid.setContentsMargins(0, 6, 0, 6)
+        self.yt_days: Dict[int, tuple] = {}
+        for index, name in enumerate(WEEKDAY_NAMES):
+            checkbox = QCheckBox(name)
             checkbox.setMinimumHeight(30)
-            checkbox.setChecked(str(self.settings.value(f"yt_dzien_{numer}", "true")).lower() == "true")
-            godzina = QComboBox()
-            godzina.addItems(GODZINY_PUBLIKACJI)
-            zapisana = str(self.settings.value(f"yt_godzina_{numer}", domyslne[numer]))
-            if zapisana not in GODZINY_PUBLIKACJI:
-                zapisana = domyslne[numer]
-            godzina.setCurrentText(zapisana)
-            godzina.setMaxVisibleItems(12)
-            hint = godzina.sizeHint()
-            godzina.setMinimumSize(int(hint.width() * 1.2), max(34, int(hint.height() * 1.2)))
-            checkbox.toggled.connect(godzina.setEnabled)
-            godzina.setEnabled(checkbox.isChecked())
-            siatka.addWidget(checkbox, 0, numer)
-            siatka.addWidget(godzina, 1, numer)
-            siatka.setColumnStretch(numer, 1)
-            self.yt_dni[numer] = (checkbox, godzina)
-        layout.addLayout(siatka)
-        layout.addWidget(self.yt_tryb_od_razu)
-        grupa.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            checkbox.setChecked(str(self.settings.value(f"yt_dzien_{index}", "true")).lower() == "true")
+            time_combo = QComboBox()
+            time_combo.addItems(PUBLISH_TIMES)
+            remembered = str(self.settings.value(f"yt_godzina_{index}", defaults[index]))
+            if remembered not in PUBLISH_TIMES:
+                remembered = defaults[index]
+            time_combo.setCurrentText(remembered)
+            time_combo.setMaxVisibleItems(12)
+            hint = time_combo.sizeHint()
+            time_combo.setMinimumSize(int(hint.width() * 1.2), max(34, int(hint.height() * 1.2)))
+            checkbox.toggled.connect(time_combo.setEnabled)
+            time_combo.setEnabled(checkbox.isChecked())
+            grid.addWidget(checkbox, 0, index)
+            grid.addWidget(time_combo, 1, index)
+            grid.setColumnStretch(index, 1)
+            self.yt_days[index] = (checkbox, time_combo)
+        layout.addLayout(grid)
+        layout.addWidget(self.yt_mode_publish_now)
+        group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        for kontrolka in (self.yt_tryb_plan, self.yt_tryb_od_razu, self.yt_wlasny_plan):
-            kontrolka.toggled.connect(self._zmien_publikacje)
-        for checkbox, godzina in self.yt_dni.values():
-            checkbox.toggled.connect(self._zmien_publikacje)
-            godzina.currentTextChanged.connect(self._zmien_publikacje)
-        self._odswiez_publikacje()
-        return grupa
+        for control in (self.yt_mode_schedule, self.yt_mode_publish_now, self.yt_custom_schedule):
+            control.toggled.connect(self._on_publish_settings_changed)
+        for checkbox, time_combo in self.yt_days.values():
+            checkbox.toggled.connect(self._on_publish_settings_changed)
+            time_combo.currentTextChanged.connect(self._on_publish_settings_changed)
+        self._refresh_publish_controls()
+        return group
 
-    def _zmien_publikacje(self, *_):
+    def _on_publish_settings_changed(self, *_):
         s = self.settings
-        s.setValue("yt_od_razu", "true" if self.yt_tryb_od_razu.isChecked() else "false")
-        s.setValue("yt_wlasny_plan", "true" if self.yt_wlasny_plan.isChecked() else "false")
-        for numer, (checkbox, godzina) in self.yt_dni.items():
-            s.setValue(f"yt_dzien_{numer}", "true" if checkbox.isChecked() else "false")
-            s.setValue(f"yt_godzina_{numer}", godzina.currentText())
-        self._odswiez_publikacje()
+        s.setValue("yt_od_razu", "true" if self.yt_mode_publish_now.isChecked() else "false")
+        s.setValue("yt_wlasny_plan", "true" if self.yt_custom_schedule.isChecked() else "false")
+        for index, (checkbox, time_combo) in self.yt_days.items():
+            s.setValue(f"yt_dzien_{index}", "true" if checkbox.isChecked() else "false")
+            s.setValue(f"yt_godzina_{index}", time_combo.currentText())
+        self._refresh_publish_controls()
 
-    def _odswiez_publikacje(self):
-        plan = self.yt_tryb_plan.isChecked()
-        self.yt_wlasny_plan.setEnabled(plan)
-        aktywny = plan and self.yt_wlasny_plan.isChecked()
-        for checkbox, godzina in self.yt_dni.values():
-            checkbox.setEnabled(aktywny)
-            godzina.setEnabled(aktywny and checkbox.isChecked())
+    def _refresh_publish_controls(self):
+        schedule = self.yt_mode_schedule.isChecked()
+        self.yt_custom_schedule.setEnabled(schedule)
+        active = schedule and self.yt_custom_schedule.isChecked()
+        for checkbox, time_combo in self.yt_days.values():
+            checkbox.setEnabled(active)
+            time_combo.setEnabled(active and checkbox.isChecked())
 
-    def _godziny_publikacji(self) -> Optional[Dict[int, dt_time]]:
-        if self.yt_tryb_od_razu.isChecked() or not self.yt_wlasny_plan.isChecked():
+    def _publish_times(self) -> Optional[Dict[int, dt_time]]:
+        if self.yt_mode_publish_now.isChecked() or not self.yt_custom_schedule.isChecked():
             return None
         return {
-            numer: dt_time.fromisoformat(godzina.currentText())
-            for numer, (checkbox, godzina) in self.yt_dni.items()
+            index: dt_time.fromisoformat(time_combo.currentText())
+            for index, (checkbox, time_combo) in self.yt_days.items()
             if checkbox.isChecked()
         }
 
-    def _wybierz_folder_yt(self, checked: bool = False):
+    def _choose_yt_folder(self, checked: bool = False):
         del checked
-        start = self.yt_folder.text().strip() or str(PROJEKT)
-        wybrany = QFileDialog.getExistingDirectory(self, "Folder z filmami do wysłania", start)
-        if wybrany:
-            self.yt_folder.setText(wybrany)
-            self.settings.setValue("folder_youtube", wybrany)
+        start = self.yt_folder.text().strip() or str(PROJECT_DIR)
+        chosen = QFileDialog.getExistingDirectory(self, "Folder z filmami do wysłania", start)
+        if chosen:
+            self.yt_folder.setText(chosen)
+            self.settings.setValue("folder_youtube", chosen)
 
-    def _folder_yt(self) -> Path:
-        pole = self.fields["folder_wyjsciowy"] if self.yt_ten_sam_folder.isChecked() else self.yt_folder
-        return Path(pole.text().strip())
+    def _resolve_yt_folder(self) -> Path:
+        field = self.fields["folder_wyjsciowy"] if self.yt_same_folder.isChecked() else self.yt_folder
+        return Path(field.text().strip())
 
-    def _wyslij_do_yt(self, checked: bool = False):
+    def _send_to_yt(self, checked: bool = False):
         del checked
-        folder = self._folder_yt()
+        folder = self._resolve_yt_folder()
         if not folder.is_dir():
             QMessageBox.warning(self, "Nieprawidłowy folder", f"Folder nie istnieje:\n{folder}")
             return
-        publikuj = not self.yt_podglad.isChecked()
-        godziny = self._godziny_publikacji()
-        od_razu = self.yt_tryb_od_razu.isChecked()
-        if godziny is not None and not godziny:
+        publish = not self.yt_preview_only.isChecked()
+        publish_times = self._publish_times()
+        publish_now = self.yt_mode_publish_now.isChecked()
+        if publish_times is not None and not publish_times:
             QMessageBox.warning(self, "Publikacja", "Zaznacz co najmniej jeden dzień tygodnia.")
             return
-        opis_trybu = (
-            "NATYCHMIAST jako publiczne" if od_razu else "prywatne, z zaplanowaną publikacją"
+        mode_description = (
+            "NATYCHMIAST jako publiczne" if publish_now else "prywatne, z zaplanowaną publikacją"
         )
-        if publikuj and QMessageBox.question(
+        if publish and QMessageBox.question(
             self,
             "Wysyłanie na YouTube",
-            f"Wysłać filmy MP4 z folderu:\n{folder}\n\nna YouTube ({opis_trybu})?",
+            f"Wysłać filmy MP4 z folderu:\n{folder}\n\nna YouTube ({mode_description})?",
         ) != QMessageBox.Yes:
             return
         self.yt_log.clear()
-        self.yt_status.setText("Wysyłanie…" if publikuj else "Sprawdzanie (podgląd)…")
+        self.yt_status.setText("Wysyłanie…" if publish else "Sprawdzanie (podgląd)…")
         self.yt_start.setEnabled(False)
         self.yt_cancel.setEnabled(True)
         self.yt_cancel_event = Event()
@@ -604,22 +612,22 @@ class MainWindow(QMainWindow):
         self.yt_worker = YouTubeWorker(
             folder,
             Path(self.fields["plik_opisu_zawodow"].text().strip()),
-            publikuj,
+            publish,
             self.yt_cancel_event,
-            godziny,
-            od_razu,
+            publish_times,
+            publish_now,
         )
         self.yt_worker.moveToThread(self.yt_thread)
         self.yt_thread.started.connect(self.yt_worker.run)
         self.yt_worker.log.connect(self.yt_log.appendPlainText)
-        self.yt_worker.completed.connect(self._zakoncz_yt)
+        self.yt_worker.completed.connect(self._finish_yt)
         self.yt_worker.completed.connect(self.yt_thread.quit)
         self.yt_worker.completed.connect(self.yt_worker.deleteLater)
         self.yt_thread.finished.connect(self.yt_thread.deleteLater)
-        self.yt_thread.finished.connect(self._posprzataj_yt)
+        self.yt_thread.finished.connect(self._cleanup_yt)
         self.yt_thread.start()
 
-    def _przerwij_yt(self, checked: bool = False):
+    def _cancel_yt(self, checked: bool = False):
         del checked
         if self.yt_cancel_event is None or self.yt_cancel_event.is_set():
             return
@@ -628,222 +636,225 @@ class MainWindow(QMainWindow):
         self.yt_status.setText("Przerywanie wysyłania…")
         self.yt_log.appendPlainText("Żądanie przerwania wysłane. Wysyłanie zatrzyma się po bieżącym fragmencie pliku.")
 
-    def _zakoncz_yt(self, sukces: bool, komunikat: str):
-        self.yt_status.setText(komunikat)
+    def _finish_yt(self, success: bool, message: str):
+        self.yt_status.setText(message)
         self.yt_cancel.setEnabled(False)
         self.yt_cancel_event = None
-        if sukces:
-            self.yt_log.appendPlainText(komunikat)
-        elif "przerwano" in komunikat.lower():
-            self.yt_log.appendPlainText(komunikat)
+        if success:
+            self.yt_log.appendPlainText(message)
+        elif "przerwano" in message.lower():
+            self.yt_log.appendPlainText(message)
         else:
-            QMessageBox.warning(self, "YouTube", komunikat)
+            QMessageBox.warning(self, "YouTube", message)
 
-    def _posprzataj_yt(self):
+    def _cleanup_yt(self):
         self.yt_worker = None
         self.yt_thread = None
         self.yt_start.setEnabled(True)
 
-    def _zbuduj_imagemagick(self):
-        grupa = QGroupBox("ImageMagick (napisy)")
-        layout = QVBoxLayout(grupa)
-        wiersz = QHBoxLayout()
-        etykieta = QLabel("Program magick")
-        etykieta.setMinimumWidth(150)
-        self.pole_imagemagick = QLineEdit(zapisana_sciezka_imagemagick())
-        self.pole_imagemagick.setClearButtonEnabled(True)
-        self.pole_imagemagick.setPlaceholderText("Pusto = automatyczne wyszukiwanie w PATH")
-        self.pole_imagemagick.editingFinished.connect(self._zapisz_imagemagick)
-        przycisk = QPushButton("Przeglądaj…")
-        przycisk.clicked.connect(self._wybierz_imagemagick)
-        wiersz.addWidget(etykieta)
-        wiersz.addWidget(self.pole_imagemagick, 1)
-        wiersz.addWidget(przycisk)
-        layout.addLayout(wiersz)
-        self.status_imagemagick = QLabel("")
-        self.status_imagemagick.setObjectName("fileStatus")
-        layout.addWidget(self.status_imagemagick)
-        self._pokaz_status_imagemagick()
-        return grupa
+    def _build_imagemagick(self):
+        group = QGroupBox("ImageMagick (napisy)")
+        layout = QVBoxLayout(group)
+        row = QHBoxLayout()
+        label = QLabel("Program magick")
+        label.setMinimumWidth(150)
+        self.imagemagick_field = QLineEdit(saved_imagemagick_path())
+        self.imagemagick_field.setClearButtonEnabled(True)
+        self.imagemagick_field.setPlaceholderText("Pusto = automatyczne wyszukiwanie w PATH")
+        self.imagemagick_field.editingFinished.connect(self._save_imagemagick)
+        button = QPushButton("Przeglądaj…")
+        button.clicked.connect(self._choose_imagemagick)
+        row.addWidget(label)
+        row.addWidget(self.imagemagick_field, 1)
+        row.addWidget(button)
+        layout.addLayout(row)
+        self.imagemagick_status = QLabel("")
+        self.imagemagick_status.setObjectName("fileStatus")
+        layout.addWidget(self.imagemagick_status)
+        self._show_imagemagick_status()
+        return group
 
-    def _wybierz_imagemagick(self, checked: bool = False):
+    def _choose_imagemagick(self, checked: bool = False):
         del checked
-        aktualna = self.pole_imagemagick.text().strip()
-        filtr = "Program (*.exe);;Wszystkie pliki (*)" if sys.platform == "win32" else "Wszystkie pliki (*)"
-        sciezka, _ = QFileDialog.getOpenFileName(
-            self, "Wskaż program ImageMagick (magick)", aktualna or str(Path.home()), filtr
+        current = self.imagemagick_field.text().strip()
+        file_filter = "Program (*.exe);;Wszystkie pliki (*)" if sys.platform == "win32" else "Wszystkie pliki (*)"
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Wskaż program ImageMagick (magick)", current or str(Path.home()), file_filter
         )
-        if sciezka:
-            self.pole_imagemagick.setText(str(Path(sciezka)))
-            self._zapisz_imagemagick()
+        if path:
+            self.imagemagick_field.setText(str(Path(path)))
+            self._save_imagemagick()
 
-    def _zapisz_imagemagick(self):
-        sciezka = self.pole_imagemagick.text().strip()
+    def _save_imagemagick(self):
+        path = self.imagemagick_field.text().strip()
         try:
-            zapisz_sciezke_imagemagick(sciezka)
-        except OSError as blad:
-            self.status_imagemagick.setText(f"Nie udało się zapisać settings.json: {blad}")
+            save_imagemagick_path(path)
+        except OSError as error:
+            self.imagemagick_status.setText(f"Nie udało się zapisać settings.json: {error}")
             return
-        self._pokaz_status_imagemagick()
+        self._show_imagemagick_status()
 
-    def _pokaz_status_imagemagick(self):
-        sciezka = self.pole_imagemagick.text().strip()
-        if not sciezka:
-            self.status_imagemagick.setText(f"Zapisano w {PLIK_USTAWIEN.name}: automatyczne wyszukiwanie w PATH")
-        elif Path(sciezka).is_file():
-            self.status_imagemagick.setText(f"Zapisano w {PLIK_USTAWIEN.name}: {sciezka}")
+    def _show_imagemagick_status(self):
+        path = self.imagemagick_field.text().strip()
+        if not path:
+            self.imagemagick_status.setText(f"Zapisano w {SETTINGS_FILE.name}: automatyczne wyszukiwanie w PATH")
+        elif Path(path).is_file():
+            self.imagemagick_status.setText(f"Zapisano w {SETTINGS_FILE.name}: {path}")
         else:
-            self.status_imagemagick.setText(
-                f"Zapisano w {PLIK_USTAWIEN.name}, ale plik nie istnieje — użyty zostanie ImageMagick z PATH"
+            self.imagemagick_status.setText(
+                f"Zapisano w {SETTINGS_FILE.name}, ale plik nie istnieje — użyty zostanie ImageMagick z PATH"
             )
 
-    def _zbuduj_pomoc(self):
-        strona = QWidget()
-        layout = QVBoxLayout(strona)
+    def _build_help_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(12)
 
-        pasek = QHBoxLayout()
-        opis = QLabel("Sprawdź wymagane biblioteki Pythona oraz FFmpeg i ImageMagick.")
-        opis.setObjectName("muted")
+        bar = QHBoxLayout()
+        description = QLabel("Sprawdź wymagane biblioteki Pythona oraz FFmpeg i ImageMagick.")
+        description.setObjectName("muted")
         self.test_button = QPushButton("🩺  Test Systemu")
         self.test_button.setObjectName("primary")
-        self.test_button.clicked.connect(self._uruchom_test_systemu)
-        pasek.addWidget(opis, 1)
-        pasek.addWidget(self.test_button)
-        layout.addLayout(pasek)
+        self.test_button.clicked.connect(self._run_system_test)
+        bar.addWidget(description, 1)
+        bar.addWidget(self.test_button)
+        layout.addLayout(bar)
 
-        self.test_wyniki = QTextBrowser()
-        self.test_wyniki.setMaximumHeight(320)
-        self.test_wyniki.setVisible(False)
-        layout.addWidget(self.test_wyniki)
+        self.test_results = QTextBrowser()
+        self.test_results.setMaximumHeight(320)
+        self.test_results.setVisible(False)
+        layout.addWidget(self.test_results)
 
-        przegladarka = QTextBrowser()
-        przegladarka.setOpenExternalLinks(True)
-        przegladarka.document().setDefaultStyleSheet(
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.document().setDefaultStyleSheet(
             "h1, h2, h3 { color: #43e0c1; } a { color: #6cb6ff; } "
             "code, pre { color: #f0c987; background: #1b2531; } "
             "th, td { padding: 4px 8px; }"
         )
-        plik = Path(__file__).resolve().parent / "README.md"
+        readme_path = Path(__file__).resolve().parent / "README.md"
         try:
-            przegladarka.setMarkdown(plik.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError) as blad:
-            przegladarka.setPlainText(f"Nie udało się wczytać pliku pomocy:\n{plik}\n\n{blad}")
-        layout.addWidget(przegladarka)
-        return strona
+            browser.setMarkdown(readme_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as error:
+            browser.setPlainText(f"Nie udało się wczytać pliku pomocy:\n{readme_path}\n\n{error}")
+        layout.addWidget(browser)
+        return page
 
-    def _uruchom_test_systemu(self, checked: bool = False, automatycznie: bool = False):
+    def _run_system_test(self, checked: bool = False, automatic: bool = False):
         del checked
         if self.test_thread is not None:
             return
-        self._test_automatyczny = automatycznie
+        self._test_automatic = automatic
         self.test_button.setEnabled(False)
         self.test_button.setText("Trwa testowanie…")
-        self.test_wyniki.setVisible(True)
-        self.test_wyniki.setHtml("<p>Sprawdzanie systemu, to może potrwać kilka sekund…</p>")
+        self.test_results.setVisible(True)
+        self.test_results.setHtml("<p>Sprawdzanie systemu, to może potrwać kilka sekund…</p>")
         self.test_thread = QThread(self)
         self.test_worker = SystemCheckWorker()
         self.test_worker.moveToThread(self.test_thread)
         self.test_thread.started.connect(self.test_worker.run)
-        self.test_worker.finished.connect(self._pokaz_wynik_testu)
+        self.test_worker.finished.connect(self._show_test_result)
         self.test_worker.finished.connect(self.test_thread.quit)
         self.test_thread.finished.connect(self.test_worker.deleteLater)
         self.test_thread.finished.connect(self.test_thread.deleteLater)
-        self.test_thread.finished.connect(self._zwolnij_watek_testu)
+        self.test_thread.finished.connect(self._release_test_thread)
         self.test_thread.start()
 
-    def _zwolnij_watek_testu(self):
+    def _release_test_thread(self):
         self.test_thread = None
         self.test_worker = None
 
-    def _test_przy_starcie(self):
-        self._uruchom_test_systemu(automatycznie=True)
+    def _test_on_startup(self):
+        self._run_system_test(automatic=True)
 
-    def _pokaz_wynik_testu(self, html: str, problemy: bool):
-        if self._test_automatyczny and not problemy:
-            self.test_wyniki.setVisible(False)
+    def _show_test_result(self, html: str, has_problems: bool):
+        if self._test_automatic and not has_problems:
+            self.test_results.setVisible(False)
         else:
-            self.test_wyniki.setHtml(html)
+            self.test_results.setHtml(html)
         self.test_button.setEnabled(True)
         self.test_button.setText("🩺  Test Systemu")
-        if self._test_automatyczny and problemy:
-            self.tabs.setCurrentWidget(self.tab_pomoc)
+        if self._test_automatic and has_problems:
+            self.tabs.setCurrentWidget(self.tab_help)
             self.status.setText("Wykryto braki w systemie — szczegóły w zakładce Pomoc")
 
-    def _zbuduj_zawody(self):
-        strona = QWidget()
-        layout = QVBoxLayout(strona)
+    def _build_competition_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(10)
-        opis = QLabel("Edytuj dane zawodów bezpośrednio w plikach tekstowych używanych przez montaż.")
-        opis.setObjectName("muted")
-        layout.addWidget(opis)
-        mapowanie = self._stworz_edytor("plik_z_torami", "Mapowanie torów")
-        mapowanie.layout().insertLayout(1, self._zbuduj_wybor_orientacji())
-        layout.addWidget(mapowanie)
-        layout.addWidget(self._stworz_edytor("plik_z_wynikami", "Wyniki zawodów"))
+        description = QLabel("Edytuj dane zawodów bezpośrednio w plikach tekstowych używanych przez montaż.")
+        description.setObjectName("muted")
+        layout.addWidget(description)
+        track_mapping = self._create_editor("plik_z_torami", "Mapowanie torów")
+        track_mapping.layout().insertLayout(1, self._build_orientation_choice())
+        layout.addWidget(track_mapping)
+        layout.addWidget(self._create_editor("plik_z_wynikami", "Wyniki zawodów"))
         layout.addStretch(1)
-        return strona
+        return page
 
-    def _zbuduj_wybor_orientacji(self):
-        wiersz = QHBoxLayout()
-        etykieta = QLabel("Rodzaj wszystkich filmów:")
-        self.radio_pionowe = QRadioButton("Wideo Pionowe")
-        self.radio_poziome = QRadioButton("Wideo Poziome")
-        grupa = QButtonGroup(self)
-        grupa.addButton(self.radio_pionowe)
-        grupa.addButton(self.radio_poziome)
-        zapamietana = str(self.settings.value("domyslna_orientacja", "V")).upper()
-        (self.radio_poziome if zapamietana == "H" else self.radio_pionowe).setChecked(True)
-        self.radio_pionowe.toggled.connect(self._zapamietaj_orientacje)
+    def _build_orientation_choice(self):
+        row = QHBoxLayout()
+        label = QLabel("Rodzaj wszystkich filmów:")
+        self.radio_vertical = QRadioButton("Wideo Pionowe")
+        self.radio_horizontal = QRadioButton("Wideo Poziome")
+        group = QButtonGroup(self)
+        group.addButton(self.radio_vertical)
+        group.addButton(self.radio_horizontal)
+        remembered = str(self.settings.value("domyslna_orientacja", "V")).upper()
+        (self.radio_horizontal if remembered == "H" else self.radio_vertical).setChecked(True)
+        self.radio_vertical.toggled.connect(self._remember_orientation)
 
-        pomoc = QPushButton("?")
-        pomoc.setObjectName("helpButton")
-        pomoc.setFixedSize(30, 30)
-        pomoc.setCursor(Qt.PointingHandCursor)
-        pomoc.setToolTip("Jeżeli chcesz by każdy plik był innego rodzaju przeczytaj pomoc")
-        pomoc.clicked.connect(lambda: self.tabs.setCurrentWidget(self.tab_pomoc))
+        help_button = QPushButton("?")
+        help_button.setObjectName("helpButton")
+        help_button.setFixedSize(30, 30)
+        help_button.setCursor(Qt.PointingHandCursor)
+        help_button.setToolTip("Jeżeli chcesz by każdy plik był innego rodzaju przeczytaj pomoc")
+        help_button.clicked.connect(lambda: self.tabs.setCurrentWidget(self.tab_help))
 
-        wiersz.addWidget(etykieta)
-        wiersz.addWidget(self.radio_pionowe)
-        wiersz.addWidget(self.radio_poziome)
-        wiersz.addWidget(pomoc)
-        wiersz.addStretch(1)
-        return wiersz
+        row.addWidget(label)
+        row.addWidget(self.radio_vertical)
+        row.addWidget(self.radio_horizontal)
+        row.addWidget(help_button)
+        row.addStretch(1)
+        return row
 
-    def _zapamietaj_orientacje(self, checked: bool = False):
+    def _remember_orientation(self, checked: bool = False):
         del checked
-        self.settings.setValue("domyslna_orientacja", self._domyslna_orientacja())
+        self.settings.setValue("domyslna_orientacja", self._default_orientation())
 
-    def _domyslna_orientacja(self) -> str:
-        return "H" if self.radio_poziome.isChecked() else "V"
+    def _remember_subtitles(self, checked: bool = False):
+        self.settings.setValue("dodaj_napisy", "true" if checked else "false")
 
-    def _dodaj_pole_sciezki(self, layout, key: str, label: str, kind: str):
-        wiersz = QHBoxLayout()
-        etykieta = QLabel(label)
-        etykieta.setMinimumWidth(150)
-        pole = QLineEdit()
-        pole.setClearButtonEnabled(True)
-        pole.setPlaceholderText("Wskaż ścieżkę…")
-        self.fields[key] = pole
-        pole.editingFinished.connect(partial(self._zapamietaj_sciezke, key))
-        przycisk = QPushButton("Przeglądaj…")
-        przycisk.clicked.connect(partial(self._wybierz, key, kind))
-        wiersz.addWidget(etykieta)
-        wiersz.addWidget(pole, 1)
-        wiersz.addWidget(przycisk)
-        layout.addLayout(wiersz)
+    def _default_orientation(self) -> str:
+        return "H" if self.radio_horizontal.isChecked() else "V"
 
-    def _stworz_edytor(self, key: str, title: str):
-        grupa = QGroupBox(title)
-        layout = QVBoxLayout(grupa)
-        self._dodaj_pole_sciezki(layout, key, "Plik TXT", "file")
+    def _add_path_field(self, layout, key: str, label: str, kind: str):
+        row = QHBoxLayout()
+        label_widget = QLabel(label)
+        label_widget.setMinimumWidth(150)
+        field = QLineEdit()
+        field.setClearButtonEnabled(True)
+        field.setPlaceholderText("Wskaż ścieżkę…")
+        self.fields[key] = field
+        field.editingFinished.connect(partial(self._remember_path, key))
+        button = QPushButton("Przeglądaj…")
+        button.clicked.connect(partial(self._choose_path, key, kind))
+        row.addWidget(label_widget)
+        row.addWidget(field, 1)
+        row.addWidget(button)
+        layout.addLayout(row)
+
+    def _create_editor(self, key: str, title: str):
+        group = QGroupBox(title)
+        layout = QVBoxLayout(group)
+        self._add_path_field(layout, key, "Plik TXT", "file")
 
         editor = QPlainTextEdit()
         editor.setMinimumHeight(125)
         editor.setPlaceholderText(f"Wpisz lub wklej treść: {title.lower()}…")
-        editor.textChanged.connect(partial(self._oznacz_zmiany, key))
+        editor.textChanged.connect(partial(self._mark_dirty, key))
         self.editors[key] = editor
         layout.addWidget(editor, 1)
 
@@ -851,17 +862,17 @@ class MainWindow(QMainWindow):
         status = QLabel("Plik nie został jeszcze wczytany")
         status.setObjectName("fileStatus")
         self.editor_status[key] = status
-        wczytaj = QPushButton("Wczytaj z pliku")
-        wczytaj.clicked.connect(partial(self._wczytaj_plik, key, True))
-        zapisz = QPushButton("Zapisz do pliku")
-        zapisz.clicked.connect(partial(self._zapisz_plik, key, True))
+        load_button = QPushButton("Wczytaj z pliku")
+        load_button.clicked.connect(partial(self._load_file, key, True))
+        save_button = QPushButton("Zapisz do pliku")
+        save_button.clicked.connect(partial(self._save_file, key, True))
         controls.addWidget(status, 1)
-        controls.addWidget(wczytaj)
-        controls.addWidget(zapisz)
+        controls.addWidget(load_button)
+        controls.addWidget(save_button)
         layout.addLayout(controls)
-        return grupa
+        return group
 
-    def _domyslne_sciezki(self) -> KonfiguracjaSciezek:
+    def _default_paths(self) -> KonfiguracjaSciezek:
         return KonfiguracjaSciezek(
             folder_wejsciowy=Path(FOLDER_WEJSCIOWY),
             folder_wyjsciowy=Path(FOLDER_WYJSCIOWY),
@@ -872,166 +883,171 @@ class MainWindow(QMainWindow):
             plik_opisu_zawodow=Path(PLIK_OPISU_ZAWODOW),
         )
 
-    def _wczytaj_ustawienia(self):
-        domyslne = self._domyslne_sciezki()
-        for key, _, _ in self.SCIEZKI:
-            wartosc = popraw_sciezke(self.settings.value(key, str(getattr(domyslne, key))))
-            self.fields[key].setText(str(wartosc))
+    def _load_settings(self):
+        defaults = self._default_paths()
+        for key, _, _ in self.PATHS:
+            value = fix_path(self.settings.value(key, str(getattr(defaults, key))))
+            self.fields[key].setText(str(value))
 
-    def _wczytaj_startowe_pliki(self):
-        for key, _ in self.EDYTORY:
-            self._wczytaj_plik(key, False)
+    def _load_startup_files(self):
+        for key, _ in self.EDITORS:
+            self._load_file(key, False)
 
-    def _wybierz(self, key: str, kind: str, checked: bool = False):
+    def _choose_path(self, key: str, kind: str, checked: bool = False):
         del checked
         if key in self.editors and key in self._dirty_editors:
-            decyzja = QMessageBox.warning(
+            decision = QMessageBox.warning(
                 self,
                 "Niezapisane zmiany",
                 "Edytor zawiera niezapisane zmiany. Zapisać je przed wyborem innego pliku?",
                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
                 QMessageBox.Save,
             )
-            if decyzja == QMessageBox.Cancel:
+            if decision == QMessageBox.Cancel:
                 return
-            if decyzja == QMessageBox.Save and not self._zapisz_plik(key):
+            if decision == QMessageBox.Save and not self._save_file(key):
                 return
-            if decyzja == QMessageBox.Discard:
+            if decision == QMessageBox.Discard:
                 self._dirty_editors.discard(key)
 
-        aktualna = Path(self.fields[key].text().strip() or ".")
+        current = Path(self.fields[key].text().strip() or ".")
         if kind == "dir":
-            sciezka = QFileDialog.getExistingDirectory(self, "Wybierz folder", str(aktualna))
+            path = QFileDialog.getExistingDirectory(self, "Wybierz folder", str(current))
         else:
-            sciezka, _ = QFileDialog.getOpenFileName(
-                self, "Wybierz plik tekstowy", str(aktualna), "Pliki tekstowe (*.txt);;Wszystkie pliki (*)"
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Wybierz plik tekstowy", str(current), "Pliki tekstowe (*.txt);;Wszystkie pliki (*)"
             )
-        if sciezka:
-            self.fields[key].setText(sciezka)
-            self._zapamietaj_sciezke(key)
+        if path:
+            self.fields[key].setText(path)
+            self._remember_path(key)
             if key in self.editors:
-                self._wczytaj_plik(key, True)
+                self._load_file(key, True)
 
-    def _zapamietaj_sciezke(self, key: str):
+    def _remember_path(self, key: str):
         self.settings.setValue(key, self.fields[key].text().strip())
 
-    def _oznacz_zmiany(self, key: str):
+    def _mark_dirty(self, key: str):
         self._dirty_editors.add(key)
         self.editor_status[key].setText("Niezapisane zmiany")
 
-    def _wczytaj_plik(self, key: str, pokaz_blad: bool = True, checked: bool = False):
+    def _load_file(self, key: str, show_error: bool = True, checked: bool = False):
         del checked
-        if key in self._dirty_editors and pokaz_blad:
-            decyzja = QMessageBox.question(
+        if key in self._dirty_editors and show_error:
+            decision = QMessageBox.question(
                 self,
                 "Niezapisane zmiany",
                 "Wczytanie pliku zastąpi niezapisany tekst. Kontynuować?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
-            if decyzja != QMessageBox.Yes:
+            if decision != QMessageBox.Yes:
                 return False
 
-        sciezka = Path(self.fields[key].text().strip())
+        path = Path(self.fields[key].text().strip())
         try:
-            zawartosc = sciezka.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as blad:
-            komunikat = f"Nie udało się wczytać pliku:\n{sciezka}\n\n{blad}"
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            message = f"Nie udało się wczytać pliku:\n{path}\n\n{error}"
             self.editor_status[key].setText("Błąd odczytu pliku")
-            if pokaz_blad:
-                QMessageBox.warning(self, "Błąd odczytu", komunikat)
+            if show_error:
+                QMessageBox.warning(self, "Błąd odczytu", message)
             else:
-                self.editor_status[key].setToolTip(komunikat)
+                self.editor_status[key].setToolTip(message)
             return False
 
         editor = self.editors[key]
         editor.blockSignals(True)
         try:
-            editor.setPlainText(zawartosc)
+            editor.setPlainText(content)
         finally:
             editor.blockSignals(False)
         self._dirty_editors.discard(key)
-        self.editor_status[key].setText(f"Wczytano: {sciezka.name}")
-        self.editor_status[key].setToolTip(str(sciezka))
+        self.editor_status[key].setText(f"Wczytano: {path.name}")
+        self.editor_status[key].setToolTip(str(path))
         return True
 
-    def _zapisz_plik(self, key: str, pokaz_potwierdzenie: bool = False, checked: bool = False):
+    def _save_file(self, key: str, show_confirmation: bool = False, checked: bool = False):
         del checked
-        sciezka = Path(self.fields[key].text().strip())
+        path = Path(self.fields[key].text().strip())
         try:
-            sciezka.write_text(self.editors[key].toPlainText(), encoding="utf-8")
-        except (OSError, UnicodeError) as blad:
-            komunikat = f"Nie udało się zapisać pliku:\n{sciezka}\n\n{blad}"
+            path.write_text(self.editors[key].toPlainText(), encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            message = f"Nie udało się zapisać pliku:\n{path}\n\n{error}"
             self.editor_status[key].setText("Błąd zapisu pliku")
-            QMessageBox.warning(self, "Błąd zapisu", komunikat)
+            QMessageBox.warning(self, "Błąd zapisu", message)
             return False
 
         self._dirty_editors.discard(key)
-        self._zapamietaj_sciezke(key)
-        self.editor_status[key].setText(f"Zapisano: {sciezka.name}")
-        self.editor_status[key].setToolTip(str(sciezka))
-        if pokaz_potwierdzenie:
-            self.status.setText(f"Zapisano plik: {sciezka.name}")
+        self._remember_path(key)
+        self.editor_status[key].setText(f"Zapisano: {path.name}")
+        self.editor_status[key].setToolTip(str(path))
+        if show_confirmation:
+            self.status.setText(f"Zapisano plik: {path.name}")
         return True
 
-    def _zapisz_zmienione_edytory(self):
-        for key, _ in self.EDYTORY:
-            if key in self._dirty_editors and not self._zapisz_plik(key):
+    def _save_dirty_editors(self):
+        for key, _ in self.EDITORS:
+            if key in self.SUBTITLE_PATH_KEYS and not self.subtitles_check.isChecked():
+                continue
+            if key in self._dirty_editors and not self._save_file(key):
                 self.tabs.setCurrentWidget(
-                    self.tab_konfiguracja if key in {"plik_z_tekstami", "plik_opisu_zawodow"} else self.tab_zawody
+                    self.tab_config if key in {"plik_z_tekstami", "plik_opisu_zawodow"} else self.tab_competition
                 )
                 return False
         return True
 
-    def _pobierz_konfiguracje(self) -> KonfiguracjaSciezek:
+    def _get_config(self) -> KonfiguracjaSciezek:
         return KonfiguracjaSciezek(
             **{
-                key: Path(pole.text().strip())
-                for key, pole in self.fields.items()
+                key: Path(field.text().strip())
+                for key, field in self.fields.items()
             },
-            domyslna_orientacja=self._domyslna_orientacja(),
+            domyslna_orientacja=self._default_orientation(),
+            dodaj_napisy=self.subtitles_check.isChecked(),
         )
 
-    def _rozpocznij(self):
+    def _start(self):
         if uruchom_automatyzacje is None:
             QMessageBox.warning(
                 self,
                 "Brak wymaganych składników",
                 "Nie można uruchomić montażu, bo nie załadowano modułu montażu:\n"
-                f"{BLAD_MONTAZU}\n\nSprawdź zakładkę Pomoc i doinstaluj brakujące elementy.",
+                f"{ASSEMBLY_ERROR}\n\nSprawdź zakładkę Pomoc i doinstaluj brakujące elementy.",
             )
-            self.tabs.setCurrentWidget(self.tab_pomoc)
-            self._uruchom_test_systemu()
+            self.tabs.setCurrentWidget(self.tab_help)
+            self._run_system_test()
             return
-        if not self._zapisz_zmienione_edytory():
+        if not self._save_dirty_editors():
             return
-        konfiguracja = self._pobierz_konfiguracje()
-        for key, label, kind in self.SCIEZKI:
-            sciezka = getattr(konfiguracja, key)
-            if kind == "dir" and not sciezka.is_dir():
-                QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: folder nie istnieje.\n{sciezka}")
+        config = self._get_config()
+        for key, label, kind in self.PATHS:
+            path = getattr(config, key)
+            if key in self.SUBTITLE_PATH_KEYS and not config.dodaj_napisy:
+                continue
+            if kind == "dir" and not path.is_dir():
+                QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: folder nie istnieje.\n{path}")
                 return
-            if kind == "file" and not sciezka.is_file():
-                QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: plik nie istnieje.\n{sciezka}")
+            if kind == "file" and not path.is_file():
+                QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: plik nie istnieje.\n{path}")
                 return
 
         try:
-            filmy = [
-                plik for plik in konfiguracja.folder_wejsciowy.iterdir()
-                if plik.suffix.lower() in {".mp4", ".mov"} and "TEMP_MPY_" not in plik.name.upper()
+            videos = [
+                file for file in config.folder_wejsciowy.iterdir()
+                if file.suffix.lower() in {".mp4", ".mov"} and "TEMP_MPY_" not in file.name.upper()
             ]
-        except OSError as blad:
-            QMessageBox.warning(self, "Błąd folderu", f"Nie można odczytać nagrań:\n{blad}")
+        except OSError as error:
+            QMessageBox.warning(self, "Błąd folderu", f"Nie można odczytać nagrań:\n{error}")
             return
-        if not filmy:
+        if not videos:
             QMessageBox.warning(self, "Brak nagrań", "Folder źródłowy nie zawiera filmów MP4 ani MOV.")
             return
 
-        for key, _, _ in self.SCIEZKI:
-            self.settings.setValue(key, str(getattr(konfiguracja, key)))
+        for key, _, _ in self.PATHS:
+            self.settings.setValue(key, str(getattr(config, key)))
         self.log_view.clear()
         self.status.setText("Przygotowywanie montażu…")
-        self.progress_bar.setRange(0, len(filmy))
+        self.progress_bar.setRange(0, len(videos))
         self.progress_bar.setValue(0)
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -1039,55 +1055,55 @@ class MainWindow(QMainWindow):
 
         self.cancel_event = Event()
         self.worker_thread = QThread(self)
-        self.worker = MontazWorker(konfiguracja, self.cancel_event)
+        self.worker = AssemblyWorker(config, self.cancel_event)
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
-        self.worker.log.connect(self._dodaj_log)
-        self.worker.progress.connect(self._aktualizuj_postep)
-        self.worker.completed.connect(self._zakoncz)
+        self.worker.log.connect(self._append_log)
+        self.worker.progress.connect(self._update_progress)
+        self.worker.completed.connect(self._finish)
         self.worker.completed.connect(self.worker_thread.quit)
         self.worker.completed.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-        self.worker_thread.finished.connect(self._posprzataj_watek)
+        self.worker_thread.finished.connect(self._cleanup_thread)
         self.worker_thread.start()
 
-    def _przerwij(self):
+    def _cancel(self):
         if self.cancel_event is None or self.cancel_event.is_set():
             return
         self.cancel_event.set()
         self.cancel_button.setEnabled(False)
         self.status.setText("Przerywanie generowania…")
-        self._dodaj_log("Żądanie przerwania wysłane. Trwa bezpieczne zatrzymywanie bieżącego etapu.")
+        self._append_log("Żądanie przerwania wysłane. Trwa bezpieczne zatrzymywanie bieżącego etapu.")
 
-    def _dodaj_log(self, tekst: str):
-        self.log_view.appendPlainText(tekst)
+    def _append_log(self, text: str):
+        self.log_view.appendPlainText(text)
 
-    def _aktualizuj_postep(self, indeks: int, razem: int, nazwa: str, status: str):
-        self.progress_bar.setRange(0, razem)
-        self.progress_bar.setValue(indeks)
-        etykiety = {
+    def _update_progress(self, index: int, total: int, name: str, status: str):
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(index)
+        labels = {
             "done": "gotowe",
             "error": "błąd",
             "skipped": "pominięto",
             "cancelled": "przerwano",
         }
-        self.status.setText(f"{indeks}/{razem}: {nazwa} — {etykiety.get(status, status)}")
+        self.status.setText(f"{index}/{total}: {name} — {labels.get(status, status)}")
 
-    def _zakoncz(self, sukces: bool, komunikat: str):
+    def _finish(self, success: bool, message: str):
         self.job_complete = True
         if self.worker_thread is None:
             self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.cancel_event = None
-        self.status.setText(komunikat)
-        if sukces:
+        self.status.setText(message)
+        if success:
             self.progress_bar.setValue(self.progress_bar.maximum())
-        if not sukces and "przerwano" not in komunikat.lower():
-            QMessageBox.warning(self, "Montaż zakończony z błędem", komunikat)
-        elif not sukces:
-            self.log_view.append(komunikat)
+        if not success and "przerwano" not in message.lower():
+            QMessageBox.warning(self, "Montaż zakończony z błędem", message)
+        elif not success:
+            self.log_view.append(message)
 
-    def _posprzataj_watek(self):
+    def _cleanup_thread(self):
         self.worker = None
         self.worker_thread = None
         if self.job_complete:
@@ -1121,7 +1137,7 @@ def main():
     app.setApplicationName("IPSC Video Automato")
     window = MainWindow()
     window.show()
-    QTimer.singleShot(300, window._test_przy_starcie)
+    QTimer.singleShot(300, window._test_on_startup)
     sys.exit(app.exec())
 
 

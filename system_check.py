@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import List
 
-from ustawienia_aplikacji import znajdz_imagemagick
+from app_settings import find_imagemagick
 # (nazwa pakietu w pip, wymagana wersja)
-BIBLIOTEKI = (
+LIBRARIES = (
     ("moviepy", "<2.0.0"),
     ("decorator", "==4.4.2"),
     ("numpy", ""),
@@ -28,76 +28,76 @@ BIBLIOTEKI = (
 IMAGEMAGICK_WINDOWS = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 
 # Sprzętowe kodeki H.264 w kolejności prób. AMF ma własne nazwy presetów (speed/balanced/quality).
-KODEKI_SPRZETOWE_WINDOWS_LINUX = ("h264_nvenc", "h264_amf", "h264_qsv")
-KODEKI_SPRZETOWE_MACOS = ("h264_videotoolbox",)
-OPISY_KODEKOW = {
+HARDWARE_CODECS_WINDOWS_LINUX = ("h264_nvenc", "h264_amf", "h264_qsv")
+HARDWARE_CODECS_MACOS = ("h264_videotoolbox",)
+CODEC_DESCRIPTIONS = {
     "h264_nvenc": "NVIDIA NVENC",
     "h264_amf": "AMD AMF",
     "h264_qsv": "Intel Quick Sync",
     "h264_videotoolbox": "Apple VideoToolbox",
     "libx264": "procesor (libx264)",
 }
-PRESETY_KODEKOW = {"h264_amf": "speed"}
-PRESET_DOMYSLNY = "fast"
+CODEC_PRESETS = {"h264_amf": "speed"}
+DEFAULT_PRESET = "fast"
 
 
-def kodeki_sprzetowe():
-    return KODEKI_SPRZETOWE_MACOS if platform.system() == "Darwin" else KODEKI_SPRZETOWE_WINDOWS_LINUX
+def hardware_codecs():
+    return HARDWARE_CODECS_MACOS if platform.system() == "Darwin" else HARDWARE_CODECS_WINDOWS_LINUX
 
 
-def preset_dla_kodeku(kodek):
-    return PRESETY_KODEKOW.get(kodek, PRESET_DOMYSLNY)
+def preset_for_codec(codec):
+    return CODEC_PRESETS.get(codec, DEFAULT_PRESET)
 
 
-def kodek_dziala(ffmpeg, kodek):
+def codec_works(ffmpeg, codec):
     """Próbne kodowanie z tymi samymi opcjami, których używa montaż (preset, pix_fmt)."""
-    komenda = [ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=640x360:d=0.2",
-               "-c:v", kodek, "-preset", preset_dla_kodeku(kodek), "-pix_fmt", "yuv420p",
+    command = [ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=640x360:d=0.2",
+               "-c:v", codec, "-preset", preset_for_codec(codec), "-pix_fmt", "yuv420p",
                "-f", "null", "-"]
     try:
-        return subprocess.run(komenda, capture_output=True, timeout=30).returncode == 0
+        return subprocess.run(command, capture_output=True, timeout=30).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
 
 @dataclass
-class WynikTestu:
-    nazwa: str
+class CheckResult:
+    name: str
     ok: bool
-    wersja: str
-    uwaga: str = ""
-    instalacja: str = ""
+    version: str
+    note: str = ""
+    install_hint: str = ""
 
 
-def _wersja_pakietu(nazwa):
+def _package_version(name):
     try:
-        return metadata.version(nazwa)
+        return metadata.version(name)
     except metadata.PackageNotFoundError:
         return None
 
 
-def _spelnia_wymaganie(wersja, wymaganie):
-    if not wymaganie:
+def _meets_requirement(version, requirement):
+    if not requirement:
         return True
     try:
         from packaging.specifiers import SpecifierSet
         from packaging.version import Version
-        return Version(wersja) in SpecifierSet(wymaganie)
+        return Version(version) in SpecifierSet(requirement)
     except Exception:
         return True
 
 
-def _pierwsza_linia(komenda):
+def _first_line(command):
     try:
-        wynik = subprocess.run(komenda, capture_output=True, text=True, timeout=30,
-                               encoding="utf-8", errors="replace")
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30,
+                                encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return None
-    tekst = (wynik.stdout or wynik.stderr).strip()
-    return tekst.splitlines()[0] if tekst else ""
+    text = (result.stdout or result.stderr).strip()
+    return text.splitlines()[0] if text else ""
 
 
-IMPORTY = {
+IMPORT_NAMES = {
     "moviepy": "moviepy.editor",
     "Pillow": "PIL",
     "google-auth": "google.auth",
@@ -107,33 +107,33 @@ IMPORTY = {
 }
 
 
-def _blad_importu(pakiet):
-    modul = IMPORTY.get(pakiet, pakiet.replace("-", "_"))
+def _import_error(package):
+    module = IMPORT_NAMES.get(package, package.replace("-", "_"))
     try:
-        importlib.import_module(modul)
-    except Exception as blad:
-        return f"{type(blad).__name__}: {blad}"
+        importlib.import_module(module)
+    except Exception as error:
+        return f"{type(error).__name__}: {error}"
     return None
 
 
-def sprawdz_biblioteki() -> List[WynikTestu]:
-    wyniki = []
-    for nazwa, wymaganie in BIBLIOTEKI:
-        wersja = _wersja_pakietu(nazwa)
-        polecenie = f'"{sys.executable}" -m pip install "{nazwa}{wymaganie}"'
-        if wersja is None:
-            wyniki.append(WynikTestu(nazwa, False, "brak", "Nie zainstalowano", polecenie))
-        elif not _spelnia_wymaganie(wersja, wymaganie):
-            wyniki.append(WynikTestu(nazwa, False, wersja, f"Wymagana wersja {wymaganie}", polecenie))
-        elif (blad := _blad_importu(nazwa)) is not None:
-            wyniki.append(WynikTestu(nazwa, False, wersja, f"Nie można zaimportować ({blad})",
-                                     polecenie.replace("pip install", "pip install --force-reinstall")))
+def check_libraries() -> List[CheckResult]:
+    results = []
+    for name, requirement in LIBRARIES:
+        version = _package_version(name)
+        command = f'"{sys.executable}" -m pip install "{name}{requirement}"'
+        if version is None:
+            results.append(CheckResult(name, False, "brak", "Nie zainstalowano", command))
+        elif not _meets_requirement(version, requirement):
+            results.append(CheckResult(name, False, version, f"Wymagana wersja {requirement}", command))
+        elif (error := _import_error(name)) is not None:
+            results.append(CheckResult(name, False, version, f"Nie można zaimportować ({error})",
+                                       command.replace("pip install", "pip install --force-reinstall")))
         else:
-            wyniki.append(WynikTestu(nazwa, True, wersja, f"wymagane {wymaganie}" if wymaganie else ""))
-    return wyniki
+            results.append(CheckResult(name, True, version, f"wymagane {requirement}" if requirement else ""))
+    return results
 
 
-def _instrukcja_ffmpeg():
+def _ffmpeg_instructions():
     system = platform.system()
     if system == "Darwin":
         return "Zainstaluj FFmpeg z libx264: brew install ffmpeg"
@@ -142,7 +142,7 @@ def _instrukcja_ffmpeg():
     return "Zainstaluj FFmpeg z libx264: sudo apt install ffmpeg"
 
 
-def _instrukcja_imagemagick():
+def _imagemagick_instructions():
     system = platform.system()
     if system == "Darwin":
         return "Zainstaluj: brew install imagemagick"
@@ -152,7 +152,7 @@ def _instrukcja_imagemagick():
     return "Zainstaluj: sudo apt install imagemagick"
 
 
-def _znajdz_ffmpeg():
+def _find_ffmpeg():
     """FFmpeg używany przez MoviePy (jeśli dostępny), w przeciwnym razie z PATH."""
     try:
         from moviepy.config import get_setting
@@ -161,105 +161,105 @@ def _znajdz_ffmpeg():
         return shutil.which("ffmpeg")
 
 
-def sprawdz_oprogramowanie() -> List[WynikTestu]:
-    wyniki = []
-    ffmpeg = _znajdz_ffmpeg()
-    wersja = _pierwsza_linia([ffmpeg, "-version"]) if ffmpeg else None
-    if wersja is None:
-        wyniki.append(WynikTestu("FFmpeg", False, "brak", "Nie znaleziono lub nie uruchamia się",
-                                 _instrukcja_ffmpeg()))
-        wyniki.append(WynikTestu("Kodek libx264", False, "brak", "Wymaga FFmpeg", _instrukcja_ffmpeg()))
+def check_software() -> List[CheckResult]:
+    results = []
+    ffmpeg = _find_ffmpeg()
+    version = _first_line([ffmpeg, "-version"]) if ffmpeg else None
+    if version is None:
+        results.append(CheckResult("FFmpeg", False, "brak", "Nie znaleziono lub nie uruchamia się",
+                                   _ffmpeg_instructions()))
+        results.append(CheckResult("Kodek libx264", False, "brak", "Wymaga FFmpeg", _ffmpeg_instructions()))
     else:
-        numer = wersja.replace("ffmpeg version ", "").split()[0] if wersja else "nieznana"
-        wyniki.append(WynikTestu("FFmpeg", True, numer, ffmpeg))
-        if kodek_dziala(ffmpeg, "libx264"):
-            wyniki.append(WynikTestu("Kodek libx264", True, "działa"))
+        number = version.replace("ffmpeg version ", "").split()[0] if version else "nieznana"
+        results.append(CheckResult("FFmpeg", True, number, ffmpeg))
+        if codec_works(ffmpeg, "libx264"):
+            results.append(CheckResult("Kodek libx264", True, "działa"))
         else:
-            wyniki.append(WynikTestu("Kodek libx264", False, "brak", "FFmpeg bez libx264",
-                                     _instrukcja_ffmpeg()))
-        sprawdzone = [k for k in kodeki_sprzetowe()]
-        dzialajace = [k for k in sprawdzone if kodek_dziala(ffmpeg, k)]
-        if dzialajace:
-            wyniki.append(WynikTestu(
-                "Kodek sprzętowy (opcjonalny)", True, dzialajace[0],
-                f"{OPISY_KODEKOW.get(dzialajace[0], '')}; użyty zostanie pierwszy działający"))
+            results.append(CheckResult("Kodek libx264", False, "brak", "FFmpeg bez libx264",
+                                       _ffmpeg_instructions()))
+        checked = [k for k in hardware_codecs()]
+        working = [k for k in checked if codec_works(ffmpeg, k)]
+        if working:
+            results.append(CheckResult(
+                "Kodek sprzętowy (opcjonalny)", True, working[0],
+                f"{CODEC_DESCRIPTIONS.get(working[0], '')}; użyty zostanie pierwszy działający"))
         else:
-            wyniki.append(WynikTestu(
+            results.append(CheckResult(
                 "Kodek sprzętowy (opcjonalny)", True, "niedostępny",
-                f"Sprawdzono: {', '.join(sprawdzone)}. Montaż użyje libx264 (wolniej, ale działa wszędzie)"))
+                f"Sprawdzono: {', '.join(checked)}. Montaż użyje libx264 (wolniej, ale działa wszędzie)"))
 
-    sciezka = znajdz_imagemagick()
-    if not sciezka and platform.system() == "Windows" and os.path.isfile(IMAGEMAGICK_WINDOWS):
-        sciezka = IMAGEMAGICK_WINDOWS
-    if not sciezka:
-        wyniki.append(WynikTestu("ImageMagick", False, "brak", "Potrzebny do napisów",
-                                 _instrukcja_imagemagick()))
+    path = find_imagemagick()
+    if not path and platform.system() == "Windows" and os.path.isfile(IMAGEMAGICK_WINDOWS):
+        path = IMAGEMAGICK_WINDOWS
+    if not path:
+        results.append(CheckResult("ImageMagick", False, "brak", "Potrzebny do napisów",
+                                   _imagemagick_instructions()))
     else:
-        wersja = " ".join((_pierwsza_linia([sciezka, "-version"]) or "nieznana").split()[:3])
-        wyniki.append(WynikTestu("ImageMagick", True, wersja, sciezka))
-    return wyniki
+        version = " ".join((_first_line([path, "-version"]) or "nieznana").split()[:3])
+        results.append(CheckResult("ImageMagick", True, version, path))
+    return results
 
 
-def uruchom_test_systemu() -> List[WynikTestu]:
-    wyniki = [WynikTestu("Python", sys.version_info >= (3, 8), platform.python_version(),
-                         f"{platform.system()} {platform.release()}",
-                         "Zainstaluj Python 3.8 lub nowszy z python.org")]
-    wyniki.extend(sprawdz_biblioteki())
-    wyniki.extend(sprawdz_oprogramowanie())
-    return wyniki
+def run_system_check() -> List[CheckResult]:
+    results = [CheckResult("Python", sys.version_info >= (3, 8), platform.python_version(),
+                           f"{platform.system()} {platform.release()}",
+                           "Zainstaluj Python 3.8 lub nowszy z python.org")]
+    results.extend(check_libraries())
+    results.extend(check_software())
+    return results
 
 
-def formatuj_tekst(wyniki: List[WynikTestu]) -> str:
-    linie = ["TEST SYSTEMU", ""]
-    for w in wyniki:
-        linie.append(f"[{'OK' if w.ok else 'BRAK'}] {w.nazwa}: {w.wersja}" + (f"  ({w.uwaga})" if w.uwaga else ""))
-    braki = [w for w in wyniki if not w.ok]
-    linie.append("")
-    if braki:
-        linie.append("DO DOINSTALOWANIA / NAPRAWY:")
-        linie.extend(f"  - {w.nazwa}: {w.instalacja}" for w in braki)
-        linie.append("")
-        linie.append("Po instalacji uruchom aplikację ponownie.")
+def format_text(results: List[CheckResult]) -> str:
+    lines = ["TEST SYSTEMU", ""]
+    for w in results:
+        lines.append(f"[{'OK' if w.ok else 'BRAK'}] {w.name}: {w.version}" + (f"  ({w.note})" if w.note else ""))
+    missing = [w for w in results if not w.ok]
+    lines.append("")
+    if missing:
+        lines.append("DO DOINSTALOWANIA / NAPRAWY:")
+        lines.extend(f"  - {w.name}: {w.install_hint}" for w in missing)
+        lines.append("")
+        lines.append("Po instalacji uruchom aplikację ponownie.")
     else:
-        linie.append("Wszystko gotowe do pracy.")
-    return "\n".join(linie)
+        lines.append("Wszystko gotowe do pracy.")
+    return "\n".join(lines)
 
 
-def pokaz_raport_bez_qt():
+def show_report_without_qt():
     """Awaryjny raport, gdy nie da się uruchomić okna Qt (np. brak PySide6)."""
-    tekst = formatuj_tekst(uruchom_test_systemu())
+    text = format_text(run_system_check())
     try:
         import tkinter
         from tkinter import scrolledtext
-        okno = tkinter.Tk()
-        okno.title("IPSC Video Automato — brakujące składniki")
-        okno.geometry("900x560")
-        pole = scrolledtext.ScrolledText(okno, font=("Consolas", 10), wrap="word")
-        pole.insert("1.0", "Nie można uruchomić interfejsu aplikacji.\n\n" + tekst)
-        pole.configure(state="disabled")
-        pole.pack(fill="both", expand=True)
-        okno.mainloop()
+        window = tkinter.Tk()
+        window.title("IPSC Video Automato — brakujące składniki")
+        window.geometry("900x560")
+        field = scrolledtext.ScrolledText(window, font=("Consolas", 10), wrap="word")
+        field.insert("1.0", "Nie można uruchomić interfejsu aplikacji.\n\n" + text)
+        field.configure(state="disabled")
+        field.pack(fill="both", expand=True)
+        window.mainloop()
     except Exception:
-        print(tekst)
+        print(text)
 
 
-def formatuj_html(wyniki: List[WynikTestu]) -> str:
-    def esc(tekst):
-        return tekst.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def format_html(results: List[CheckResult]) -> str:
+    def esc(text):
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    wiersze = []
-    for w in wyniki:
-        znak = "<span style='color:#43e0c1'>✔</span>" if w.ok else "<span style='color:#ff7b7b'>✘</span>"
-        wiersze.append(
-            f"<tr><td>{znak}</td><td><b>{esc(w.nazwa)}</b></td><td>{esc(w.wersja)}</td>"
-            f"<td style='color:#8998ac'>{esc(w.uwaga)}</td></tr>"
+    rows = []
+    for w in results:
+        mark = "<span style='color:#43e0c1'>✔</span>" if w.ok else "<span style='color:#ff7b7b'>✘</span>"
+        rows.append(
+            f"<tr><td>{mark}</td><td><b>{esc(w.name)}</b></td><td>{esc(w.version)}</td>"
+            f"<td style='color:#8998ac'>{esc(w.note)}</td></tr>"
         )
-    braki = [w for w in wyniki if not w.ok]
-    html = ["<h2>Test systemu</h2><table cellspacing='0' cellpadding='4'>", *wiersze, "</table>"]
-    if braki:
+    missing = [w for w in results if not w.ok]
+    html = ["<h2>Test systemu</h2><table cellspacing='0' cellpadding='4'>", *rows, "</table>"]
+    if missing:
         html.append("<h3 style='color:#ff7b7b'>Do doinstalowania / naprawy</h3><ul>")
-        for w in braki:
-            html.append(f"<li><b>{esc(w.nazwa)}</b>: <code>{esc(w.instalacja)}</code></li>")
+        for w in missing:
+            html.append(f"<li><b>{esc(w.name)}</b>: <code>{esc(w.install_hint)}</code></li>")
         html.append("</ul>")
     else:
         html.append("<h3 style='color:#43e0c1'>Wszystko gotowe do pracy.</h3>")

@@ -64,7 +64,7 @@ Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejnoś
 
 | Zakładka | Zawartość |
 |---|---|
-| **Główna** | Wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
+| **Główna** | Checkbox **Czy dodać napisy** (domyślnie odznaczony), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
 | **Zawody** | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`) |
 | **Konfiguracja** | Folder z muzyką, ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube** | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania |
@@ -78,7 +78,7 @@ Montaż działa w tle; postęp i komunikaty są widoczne w oknie. Podczas monta�
 
 ### 🩺 Test Systemu
 
-Przy każdym uruchomieniu aplikacja w tle sprawdza środowisko (moduł `sprawdzanie_systemu.py`). Gdy wszystko jest w porządku, zostajesz na zakładce **Główna**. Gdy czegoś brakuje, aplikacja przechodzi do zakładki **Pomoc** i pokazuje raport. To samo możesz wywołać w każdej chwili przyciskiem **Test Systemu**.
+Przy każdym uruchomieniu aplikacja w tle sprawdza środowisko (moduł `system_check.py`). Gdy wszystko jest w porządku, zostajesz na zakładce **Główna**. Gdy czegoś brakuje, aplikacja przechodzi do zakładki **Pomoc** i pokazuje raport. To samo możesz wywołać w każdej chwili przyciskiem **Test Systemu**.
 
 Raport pokazuje wersje i status (✔ / ✘) dla:
 
@@ -106,21 +106,21 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    ```
 
 2. **Ścieżki do folderów roboczych:**
-   Domyślnie są **względne** – liczone od folderu ze skryptem (`KATALOG_PROJEKTU`), więc projekt działa na Windows, macOS i Linuksie po skopiowaniu w dowolne miejsce:
+   Domyślnie są **względne** – liczone od folderu ze skryptem (`PROJECT_DIR`), więc projekt działa na Windows, macOS i Linuksie po skopiowaniu w dowolne miejsce:
    ```python
-   FOLDER_WEJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Surowe")      # Tu wrzucasz oryginalne nagrania (mp4/mov)
-   FOLDER_WYJSCIOWY = os.path.join(KATALOG_PROJEKTU, "Gotowe")      # Tu pojawią się gotowe rolki
-   FOLDER_MUZYKI = os.path.join(KATALOG_PROJEKTU, "Muzyka")         # Podkłady muzyczne (mp3)
-   PLIK_Z_WYNIKAMI = os.path.join(KATALOG_PROJEKTU, "wyniki.txt")   # Wyniki zawodów
-   PLIK_Z_TEKSTAMI = os.path.join(KATALOG_PROJEKTU, "teksty_wideo.txt")   # Teksty u góry wideo
-   PLIK_Z_TORAMI = os.path.join(KATALOG_PROJEKTU, "mapowanie_torow.txt")       # Kolejność torów
+   FOLDER_WEJSCIOWY = os.path.join(PROJECT_DIR, "Surowe")      # Tu wrzucasz oryginalne nagrania (mp4/mov)
+   FOLDER_WYJSCIOWY = os.path.join(PROJECT_DIR, "Gotowe")      # Tu pojawią się gotowe rolki
+   FOLDER_MUZYKI = os.path.join(PROJECT_DIR, "Muzyka")         # Podkłady muzyczne (mp3)
+   PLIK_Z_WYNIKAMI = os.path.join(PROJECT_DIR, "wyniki.txt")   # Wyniki zawodów
+   PLIK_Z_TEKSTAMI = os.path.join(PROJECT_DIR, "teksty_wideo.txt")   # Teksty u góry wideo
+   PLIK_Z_TORAMI = os.path.join(PROJECT_DIR, "mapowanie_torow.txt")       # Kolejność torów
    ```
    Możesz je podmienić na dowolne własne ścieżki.
 
-   **Czcionka i kodek (automatycznie, `ustawienia_systemu.py`):** Napisy z wynikami używają czcionki systemowej (Windows: `Arial-Bold`; pozostałe systemy: Arial Bold/Helvetica lub Liberation Sans/DejaVu Sans Bold, z czcionkami z folderu `Fonts` jako zapasowymi). Dodatkowe teksty u góry używają Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`. Kodek wybierany jest automatycznie, na podstawie próbnego kodowania, w tej kolejności: `h264_nvenc` (NVIDIA), `h264_amf` (AMD), `h264_qsv` (Intel Quick Sync), na macOS `h264_videotoolbox`, a w ostateczności `libx264` (procesor; wolniejszy, ale działa wszędzie). Preset jest dobierany do kodeka (`fast`; dla AMD `speed`). Kodeki AMD (`h264_amf`) i Intel (`h264_qsv`) nie zostały jeszcze sprawdzone na prawdziwym sprzęcie (autor testował NVENC). Jeśli montaż z którymś z nich zawiedzie, uruchom **Test Systemu** w zakładce Pomoc i zgłoś problem; kodek sprzętowy nie jest wymagany, a aplikacja w razie potrzeby użyje `libx264`. Na macOS/Linuksie zainstaluj ImageMagick (`brew install imagemagick` / `sudo apt install imagemagick`).
+   **Czcionka i kodek (automatycznie, `system_settings.py`):** Napisy z wynikami używają czcionki systemowej (Windows: `Arial-Bold`; pozostałe systemy: Arial Bold/Helvetica lub Liberation Sans/DejaVu Sans Bold, z czcionkami z folderu `Fonts` jako zapasowymi). Dodatkowe teksty u góry używają Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`. Kodek wybierany jest automatycznie, na podstawie próbnego kodowania, w tej kolejności: `h264_nvenc` (NVIDIA), `h264_amf` (AMD), `h264_qsv` (Intel Quick Sync), na macOS `h264_videotoolbox`, a w ostateczności `libx264` (procesor; wolniejszy, ale działa wszędzie). Preset jest dobierany do kodeka (`fast`; dla AMD `speed`). Kodeki AMD (`h264_amf`) i Intel (`h264_qsv`) nie zostały jeszcze sprawdzone na prawdziwym sprzęcie (autor testował NVENC). Jeśli montaż z którymś z nich zawiedzie, uruchom **Test Systemu** w zakładce Pomoc i zgłoś problem; kodek sprzętowy nie jest wymagany, a aplikacja w razie potrzeby użyje `libx264`. Na macOS/Linuksie zainstaluj ImageMagick (`brew install imagemagick` / `sudo apt install imagemagick`).
 
 3a. **Kolejność torów i orientacja filmu (`mapowanie_torow.txt`):**
-   Obsługują to moduły `mapowanie_torow.py` i `kolejnosc_torow.py`. Pliki z `FOLDER_WEJSCIOWY` są sortowane alfabetycznie, a **N-ta linia** pliku `mapowanie_torow.txt` opisuje **N-ty plik**. Przykład: jeśli plik jest drugi w sortowaniu, a druga linia w `mapowanie_torow.txt` to `1`, to jest to Tor 1 (i do niego zostaną dopasowane wyniki ze `wyniki.txt`).
+   Obsługują to moduły `track_mapping.py` i `track_order.py`. Pliki z `FOLDER_WEJSCIOWY` są sortowane alfabetycznie, a **N-ta linia** pliku `mapowanie_torow.txt` opisuje **N-ty plik**. Przykład: jeśli plik jest drugi w sortowaniu, a druga linia w `mapowanie_torow.txt` to `1`, to jest to Tor 1 (i do niego zostaną dopasowane wyniki ze `wyniki.txt`).
 
    **Orientacja wszystkich filmów:** w aplikacji, w zakładce **Zawody** nad edytorem mapowania, wybierz **Wideo Pionowe** (1080×1920) lub **Wideo Poziome** (1920×1080). Wybór jest zapamiętywany i dotyczy każdego pliku, któremu nie przypisano orientacji w `mapowanie_torow.txt`. Przycisk **?** obok pokazuje podpowiedź (po najechaniu), a po kliknięciu przenosi do tej Pomocy. Jeśli chcesz, by pliki były różnego rodzaju, dopisz orientację w pliku:
 
@@ -156,6 +156,7 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    * Plik wczytywany jest w UTF-8; w aplikacji desktopowej możesz go wkleić i zapisać bezpośrednio w zakładce **Zawody**.
 
 3. **Dodatkowe teksty u góry wideo (`teksty_wideo.txt`):**
+   Teksty i napisy z wynikami są dodawane tylko wtedy, gdy na zakładce **Główna** zaznaczono **Czy dodać napisy**. Gdy checkbox jest odznaczony, pliki `wyniki.txt` i `teksty_wideo.txt` mogą być puste lub nie wybrane — nie są brane pod uwagę przy napisach, a czas przebiegu z `wyniki.txt` (jeśli jest dostępny) nadal służy do przycięcia filmu.
    Każdy tekst wpisz w nawiasach kwadratowych, np. `[Klub ZSD]`. Plik może zawierać zero lub kilka wpisów, ale **maksymalnie 5** (kolejne są ignorowane). Nadmiarowe białe znaki w tekście są normalizowane, a puste nawiasy pomijane. Brak pliku nie przerywa montażu — filmy powstaną bez tekstów.
    * Teksty pojawiają się po kolei, neonowym cyjanem z ciemnym obrysem (czcionka Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`), w górnej części wideo, z płynnym pojawianiem i znikaniem (0,4 s).
    * Każdy tekst wyświetla się min. 5 s (max 8 s), a przerwa między tekstami wynosi min. 2 s. Pierwszy tekst startuje po 1 s, a na końcu zostaje 1 s marginesu. Teksty są rozłożone równomiernie na całym filmie (bez długiej pustki na końcu).
@@ -173,7 +174,7 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    ```bash
    python ipsc_automato.py
    ```
-   Po każdym udanym renderze plik w `Gotowe` jest automatycznie przemianowywany przez `generuj_nazwy.py` na `YYYY-MM-DD - Nazwa zawodów - Tor X #bodycam.mp4`. Wymaga to poprawnie uzupełnionego `opis_zawodow.txt`.
+   Po każdym udanym renderze plik w `Gotowe` jest automatycznie przemianowywany przez `generate_names.py` na `YYYY-MM-DD - Nazwa zawodów - Tor X #bodycam.mp4`. Wymaga to poprawnie uzupełnionego `opis_zawodow.txt`.
 5. Poczekaj na wygenerowanie i przemianowanie plików wideo w `FOLDER_WYJSCIOWY`.
 
 ## 📺 Publikowanie Shorts na YouTube
@@ -217,10 +218,10 @@ Przy braku `youtube_client_secret.json` lub bibliotek Google aplikacja pokaże k
 
 ### Nazwy plików i publikacja
 
-Uzupełnij `opis_zawodow.txt` nazwą i datą zawodów. Generator `generuj_nazwy.py` odczytuje nazwę z pola `Nazwa zawodów:` lub pierwszej niepustej linii, datę z `Match starts: August 09, 2026` albo `Data zawodów: 09.08.2026`, a numer toru z nazwy takiej jak `Gotowe_Stage_3.mp4`. Tytuł ma format `YYYY-MM-DD - Nazwa zawodów - Tor X #bodycam`, jest ograniczany do 100 znaków i służy również jako nazwa pliku MP4. Jest uruchamiany automatycznie po standardowym montażu; można go też wywołać ręcznie:
+Uzupełnij `opis_zawodow.txt` nazwą i datą zawodów. Generator `generate_names.py` odczytuje nazwę z pola `Nazwa zawodów:` lub pierwszej niepustej linii, datę z `Match starts: August 09, 2026` albo `Data zawodów: 09.08.2026`, a numer toru z nazwy takiej jak `Gotowe_Stage_3.mp4`. Tytuł ma format `YYYY-MM-DD - Nazwa zawodów - Tor X #bodycam`, jest ograniczany do 100 znaków i służy również jako nazwa pliku MP4. Jest uruchamiany automatycznie po standardowym montażu; można go też wywołać ręcznie:
 
 ```bash
-python generuj_nazwy.py Gotowe_Stage_1.mp4
+python generate_names.py Gotowe_Stage_1.mp4
 ```
 
 Uploader `youtube_upload.py` jest uruchamiany z głównego skryptu wyłącznie po podaniu opcji `/yt` lub `--yt` (lub przyciskiem **Wyślij do YT** w aplikacji desktopowej). Odczytuje playlistę przesłanych filmów kanału, sprawdza zaplanowane publikacje i wybiera najbliższy wolny dzień: domyślnie poniedziałek–piątek o 7:30, sobota–niedziela o 10:00 czasu `Europe/Warsaw` (w aplikacji desktopowej można to zmienić w sekcji **PUBLIKACJA** albo publikować od razu). Uwzględnia terminy filmów zaplanowanych oraz dni publikacji filmów publicznych i niepublicznych. Opis YouTube zawiera tylko nazwę, datę, lokalizację, typ i poziom zawodów oraz hashtagi tworzone z tych pól — nie kopiuje całego pliku z opisem zawodów.
@@ -244,7 +245,7 @@ python ipsc_automato.py --yt --publish
 | `python ipsc_automato.py` | Montaż + nadanie nazw plikom; bez YouTube |
 | `python ipsc_automato.py --yt` (lub `/yt`) | Jak wyżej + podgląd tytułów i terminów; nic nie jest wysyłane |
 | `python ipsc_automato.py --yt --publish` | Jak wyżej + rzeczywisty upload zaplanowany na wolne terminy |
-| `python generuj_nazwy.py Gotowe_Stage_1.mp4` | Ręczna zmiana nazwy jednego pliku |
+| `python generate_names.py Gotowe_Stage_1.mp4` | Ręczna zmiana nazwy jednego pliku |
 | `python youtube_upload.py [plik\|folder] [--publish]` | Bezpośrednie wywołanie uploadera (domyślnie folder `Gotowe`); to samo robi zakładka **YouTube** w aplikacji |
 
 `--publish` bez `/yt` lub `--yt` jest odrzucane. Każdy film musi być pionowy lub kwadratowy i trwać maksymalnie 3 minuty. Przy wielu plikach uploader planuje najwyżej jedną publikację dziennie na wybranym kanale. Jeśli OAuth zwróci więcej niż jeden kanał, ustaw zmienną środowiskową `YOUTUBE_CHANNEL_ID` na ID właściwego kanału. Google może wymagać weryfikacji projektu OAuth, zanim filmy przesyłane przez API będą mogły być publiczne.
@@ -256,7 +257,7 @@ python ipsc_automato.py --yt --publish
 *   **`Brak pliku OAuth ... youtube_client_secret.json`:** Pobierz dane klienta OAuth typu „Aplikacja komputerowa” i zapisz je w katalogu projektu pod tą nazwą.
 *   **`Nie można jednoznacznie wybrać kanału`:** Konto ma kilka kanałów — ustaw zmienną środowiskową `YOUTUBE_CHANNEL_ID`.
 *   **Błąd daty/nazwy zawodów:** Uzupełnij `opis_zawodow.txt` (nazwa + `Match starts:`/`Data zawodów:`); numer toru musi występować w nazwie pliku (`Gotowe_Stage_3.mp4`).
-*   **Film z toru został pominięty („brak wyników dla toru N”):** W `wyniki.txt` nie ma wiersza `Stage N` dla numeru toru przypisanego w `mapowanie_torow.txt`. Sprawdź oba pliki w zakładce **Zawody**.
+*   **Film z toru został pominięty („brak wyników dla toru N”):** Pojawia się tylko przy zaznaczonym **Czy dodać napisy**. W `wyniki.txt` nie ma wiersza `Stage N` dla numeru toru przypisanego w `mapowanie_torow.txt`. Sprawdź oba pliki w zakładce **Zawody** lub odznacz checkbox na zakładce **Główna**.
 *   **Film wyszedł w złej orientacji:** W zakładce **Zawody** wybierz **Wideo Pionowe** lub **Wideo Poziome** (dotyczy wszystkich plików bez litery w `mapowanie_torow.txt`) albo dopisz w `mapowanie_torow.txt` po numerze toru `;H` (poziomy 1920×1080) lub `;V` (pionowy 1080×1920), np. `3;H` — ta litera ma pierwszeństwo.
 *   **Zakładka YouTube: „Brak pliku OAuth” lub „Brak bibliotek Google API”:** Zapisz `youtube_client_secret.json` w katalogu projektu (instrukcja wyżej) i zainstaluj zależności `python -m pip install -r requirements.txt`.
 *   **Zakładka YouTube: „Short musi mieć format pionowy lub kwadratowy”:** Film wybrany do wysyłki jest poziomy lub dłuższy niż 3 minuty — wygeneruj go ponownie jako **Wideo Pionowe**.

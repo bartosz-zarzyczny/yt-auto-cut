@@ -6,14 +6,14 @@ import sys
 
 from moviepy.config import get_setting
 
-from sprawdzanie_systemu import kodek_dziala, kodeki_sprzetowe, OPISY_KODEKOW, preset_dla_kodeku  # noqa: F401
-from ustawienia_aplikacji import znajdz_imagemagick as _znajdz_imagemagick_z_ustawien
+from system_check import codec_works, hardware_codecs, CODEC_DESCRIPTIONS, preset_for_codec  # noqa: F401
+from app_settings import find_imagemagick as _find_imagemagick_from_settings
 
-KATALOG_PROJEKTU = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Windows: nazwa fontu znana ImageMagick. Pozostałe systemy: pliki czcionek zbliżonych do Arial Bold.
-CZCIONKA_WINDOWS = "Arial-Bold"
-CZCIONKI_ZAPASOWE = [
+FONT_WINDOWS = "Arial-Bold"
+FALLBACK_FONTS = [
     # macOS
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/Library/Fonts/Arial Bold.ttf",
@@ -27,39 +27,39 @@ CZCIONKI_ZAPASOWE = [
     "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
     # Czcionka dołączona do projektu - działa zawsze
-    os.path.join(KATALOG_PROJEKTU, "Fonts", "Chakra_Petch,Oxanium", "Chakra_Petch", "ChakraPetch-Bold.ttf"),
-    os.path.join(KATALOG_PROJEKTU, "Fonts", "Oxanium", "static", "Oxanium-Bold.ttf"),
+    os.path.join(PROJECT_DIR, "Fonts", "Chakra_Petch,Oxanium", "Chakra_Petch", "ChakraPetch-Bold.ttf"),
+    os.path.join(PROJECT_DIR, "Fonts", "Oxanium", "static", "Oxanium-Bold.ttf"),
 ]
 
 
-def wybierz_czcionke():
+def choose_font():
     if platform.system() == "Windows":
-        return CZCIONKA_WINDOWS
-    for sciezka in CZCIONKI_ZAPASOWE:
-        if os.path.isfile(sciezka):
-            return sciezka
-    return CZCIONKA_WINDOWS
+        return FONT_WINDOWS
+    for path in FALLBACK_FONTS:
+        if os.path.isfile(path):
+            return path
+    return FONT_WINDOWS
 
 
-def znajdz_imagemagick(domyslna_windows=None):
+def find_imagemagick(default_windows=None):
     """Ścieżka z settings.json lub z PATH; w ostateczności wartość domyślna przekazana w argumencie."""
-    sciezka = _znajdz_imagemagick_z_ustawien()
-    if sciezka:
-        return sciezka
-    if domyslna_windows and os.path.isfile(domyslna_windows):
-        return domyslna_windows
+    path = _find_imagemagick_from_settings()
+    if path:
+        return path
+    if default_windows and os.path.isfile(default_windows):
+        return default_windows
     return None
 
 
-def _kodek_dziala(kodek):
-    return kodek_dziala(get_setting("FFMPEG_BINARY"), kodek)
+def _codec_is_usable(codec):
+    return codec_works(get_setting("FFMPEG_BINARY"), codec)
 
 
-def wybierz_kodek():
+def choose_codec():
     """Pierwszy działający kodek: NVENC (NVIDIA), AMF (AMD), QSV (Intel), VideoToolbox (macOS), libx264 (zawsze)."""
-    for kodek in kodeki_sprzetowe():
-        if _kodek_dziala(kodek):
-            return kodek
+    for codec in hardware_codecs():
+        if _codec_is_usable(codec):
+            return codec
     return "libx264"
 
 
@@ -67,26 +67,26 @@ def wybierz_kodek():
 if platform.system() == "Windows":
     os.system("")  # włącza obsługę kodów ANSI w konsoli Windows
 
-CZERWONY, ZOLTY, ZIELONY, RESET = "\033[91m", "\033[93m", "\033[92m", "\033[0m"
+RED, YELLOW, GREEN, RESET = "\033[91m", "\033[93m", "\033[92m", "\033[0m"
 
 
-def _kolor(tekst, kolor):
-    return f"{kolor}{tekst}{RESET}" if sys.stdout.isatty() else tekst
+def _color(text, color):
+    return f"{color}{text}{RESET}" if sys.stdout.isatty() else text
 
 
-def instrukcja_imagemagick():
+def imagemagick_instructions():
     system = platform.system()
     if system == "Darwin":
-        krok = "Zainstaluj: brew install imagemagick"
+        step = "Zainstaluj: brew install imagemagick"
     elif system == "Windows":
-        krok = ("Pobierz z https://imagemagick.org/script/download.php#windows i przy instalacji zaznacz\n"
+        step = ("Pobierz z https://imagemagick.org/script/download.php#windows i przy instalacji zaznacz\n"
                 "     'Install legacy utilities (e.g. convert)' oraz dodanie do PATH.")
     else:
-        krok = "Zainstaluj: sudo apt install imagemagick  (lub odpowiednik dla Twojej dystrybucji)"
-    return krok
+        step = "Zainstaluj: sudo apt install imagemagick  (lub odpowiednik dla Twojej dystrybucji)"
+    return step
 
 
-def instrukcja_ffmpeg():
+def ffmpeg_instructions():
     system = platform.system()
     if system == "Darwin":
         return "Zainstaluj FFmpeg z libx264: brew install ffmpeg"
@@ -95,33 +95,33 @@ def instrukcja_ffmpeg():
     return "Zainstaluj FFmpeg z libx264: sudo apt install ffmpeg"
 
 
-def sprawdz_srodowisko(sciezka_magick, log_callback=None):
+def check_environment(magick_path, log_callback=None):
     """Wypisuje kolorowe komunikaty. Zwraca (czy_mozna_kontynuowac, kodek)."""
     ok = True
 
-    def informuj(tekst, kolor=None):
-        print(_kolor(tekst, kolor) if kolor else tekst)
+    def inform(text, color=None):
+        print(_color(text, color) if color else text)
         if log_callback:
-            log_callback(tekst)
+            log_callback(text)
 
-    if not sciezka_magick:
+    if not magick_path:
         ok = False
-        informuj("BŁĄD: Nie znaleziono programu ImageMagick (potrzebny do napisów).", CZERWONY)
-        informuj("  Co zrobić: " + instrukcja_imagemagick(), CZERWONY)
-        informuj("  Potem uruchom skrypt ponownie.", CZERWONY)
+        inform("BŁĄD: Nie znaleziono programu ImageMagick (potrzebny do napisów).", RED)
+        inform("  Co zrobić: " + imagemagick_instructions(), RED)
+        inform("  Potem uruchom skrypt ponownie.", RED)
 
-    kodek = wybierz_kodek()
-    if kodek == "libx264" and not _kodek_dziala("libx264"):
+    codec = choose_codec()
+    if codec == "libx264" and not _codec_is_usable("libx264"):
         ok = False
-        informuj("BŁĄD: FFmpeg nie ma działającego kodeka wideo (libx264).", CZERWONY)
-        informuj("  Co zrobić: " + instrukcja_ffmpeg(), CZERWONY)
-    elif kodek == "libx264":
-        informuj("UWAGA: Brak działającego kodeka sprzętowego (NVIDIA NVENC, AMD AMF, Intel QSV, "
-                 "Apple VideoToolbox) - użyję libx264 (procesor). Renderowanie będzie wolniejsze, ale działa.",
-                 ZOLTY)
-        informuj("  Szybciej: aktualne sterowniki karty graficznej i FFmpeg z obsługą jej kodeka "
-                 "(pełna wersja ze strony gyan.dev).", ZOLTY)
+        inform("BŁĄD: FFmpeg nie ma działającego kodeka wideo (libx264).", RED)
+        inform("  Co zrobić: " + ffmpeg_instructions(), RED)
+    elif codec == "libx264":
+        inform("UWAGA: Brak działającego kodeka sprzętowego (NVIDIA NVENC, AMD AMF, Intel QSV, "
+               "Apple VideoToolbox) - użyję libx264 (procesor). Renderowanie będzie wolniejsze, ale działa.",
+               YELLOW)
+        inform("  Szybciej: aktualne sterowniki karty graficznej i FFmpeg z obsługą jej kodeka "
+               "(pełna wersja ze strony gyan.dev).", YELLOW)
     else:
-        informuj(f"Kodek wideo: {kodek} ({OPISY_KODEKOW.get(kodek, kodek)})", ZIELONY)
+        inform(f"Kodek wideo: {codec} ({CODEC_DESCRIPTIONS.get(codec, codec)})", GREEN)
 
-    return ok, kodek
+    return ok, codec

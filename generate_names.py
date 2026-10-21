@@ -6,11 +6,11 @@ from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
-KATALOG_PROJEKTU = Path(__file__).resolve().parent
-PLIK_OPISU = KATALOG_PROJEKTU / "opis_zawodow.txt"
-MAKS_DLUGOSC_TYTULU = 100
+PROJECT_DIR = Path(__file__).resolve().parent
+DESCRIPTION_FILE = PROJECT_DIR / "opis_zawodow.txt"
+MAX_TITLE_LENGTH = 100
 
-_MIESIACE = {
+_MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
     "december": 12, "stycznia": 1, "lutego": 2, "marca": 3, "kwietnia": 4,
@@ -20,170 +20,170 @@ _MIESIACE = {
 
 
 @dataclass(frozen=True)
-class DaneZawodow:
-    nazwa: str
-    data: date
-    lokalizacja: str
-    typ: str
-    poziom: str
+class MatchData:
+    name: str
+    match_date: date
+    location: str
+    match_type: str
+    level: str
 
 
-def _parsuj_date(tekst: str) -> Optional[date]:
-    for wzorzec, kolejnosc in (
+def _parse_date(text: str) -> Optional[date]:
+    for pattern, order in (
         (r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", "ymd"),
         (r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b", "dmy"),
     ):
-        dopasowanie = re.search(wzorzec, tekst)
-        if dopasowanie:
-            wartosci = [int(wartosc) for wartosc in dopasowanie.groups()]
-            rok, miesiac, dzien = (
-                wartosci if kolejnosc == "ymd" else (wartosci[2], wartosci[1], wartosci[0])
+        match = re.search(pattern, text)
+        if match:
+            values = [int(value) for value in match.groups()]
+            year, month, day = (
+                values if order == "ymd" else (values[2], values[1], values[0])
             )
             try:
-                return date(rok, miesiac, dzien)
-            except ValueError as blad:
-                raise ValueError(f"Nieprawidłowa data zawodów: {dopasowanie.group(0)}") from blad
+                return date(year, month, day)
+            except ValueError as error:
+                raise ValueError(f"Nieprawidłowa data zawodów: {match.group(0)}") from error
 
-    miesiac_wzorzec = "|".join(sorted(_MIESIACE, key=len, reverse=True))
-    dopasowanie = re.search(
-        rf"\b({miesiac_wzorzec})\s+(\d{{1,2}})(?:st|nd|rd|th)?[,]?\s+(\d{{4}})\b",
-        tekst,
+    month_pattern = "|".join(sorted(_MONTHS, key=len, reverse=True))
+    match = re.search(
+        rf"\b({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?[,]?\s+(\d{{4}})\b",
+        text,
         re.IGNORECASE,
     )
-    if dopasowanie:
-        miesiac = _MIESIACE[dopasowanie.group(1).lower()]
-        return date(int(dopasowanie.group(3)), miesiac, int(dopasowanie.group(2)))
+    if match:
+        month = _MONTHS[match.group(1).lower()]
+        return date(int(match.group(3)), month, int(match.group(2)))
 
-    dopasowanie = re.search(
-        rf"\b(\d{{1,2}})\s+({miesiac_wzorzec})\s+(\d{{4}})\b", tekst, re.IGNORECASE
+    match = re.search(
+        rf"\b(\d{{1,2}})\s+({month_pattern})\s+(\d{{4}})\b", text, re.IGNORECASE
     )
-    if dopasowanie:
-        miesiac = _MIESIACE[dopasowanie.group(2).lower()]
-        return date(int(dopasowanie.group(3)), miesiac, int(dopasowanie.group(1)))
+    if match:
+        month = _MONTHS[match.group(2).lower()]
+        return date(int(match.group(3)), month, int(match.group(1)))
     return None
 
 
-def _wartosc_pola(linie: List[str], wzorzec: str) -> str:
-    for linia in linie:
-        dopasowanie = re.match(wzorzec + r"\s*:\s*(.+?)\s*$", linia, re.IGNORECASE)
-        if dopasowanie:
-            return dopasowanie.group(1).strip()
+def _field_value(lines: List[str], pattern: str) -> str:
+    for line in lines:
+        match = re.match(pattern + r"\s*:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
     return ""
 
 
-def czytaj_dane_zawodow(sciezka_opisu: Path = PLIK_OPISU) -> DaneZawodow:
-    if not sciezka_opisu.is_file():
-        raise FileNotFoundError(f"Brak pliku z opisem zawodów: {sciezka_opisu}")
+def read_match_data(description_path: Path = DESCRIPTION_FILE) -> MatchData:
+    if not description_path.is_file():
+        raise FileNotFoundError(f"Brak pliku z opisem zawodów: {description_path}")
 
-    tekst = sciezka_opisu.read_text(encoding="utf-8-sig")
-    linie = [linia.strip() for linia in tekst.splitlines()]
-    nazwa = _wartosc_pola(linie, r"(?:Nazwa zawodów|Competition name|Match name)")
-    if not nazwa:
-        nazwa = next((linia for linia in linie if linia), "")
-    if not nazwa:
-        raise ValueError(f"Plik z opisem zawodów jest pusty: {sciezka_opisu}")
+    text = description_path.read_text(encoding="utf-8-sig")
+    lines = [line.strip() for line in text.splitlines()]
+    name = _field_value(lines, r"(?:Nazwa zawodów|Competition name|Match name)")
+    if not name:
+        name = next((line for line in lines if line), "")
+    if not name:
+        raise ValueError(f"Plik z opisem zawodów jest pusty: {description_path}")
 
-    data_zawodow = None
-    for linia in linie:
-        if re.search(r"\b(?:Match starts|Main Match|Data zawodów|Data|Termin)\b", linia, re.I):
-            data_zawodow = _parsuj_date(linia)
-            if data_zawodow:
+    match_date = None
+    for line in lines:
+        if re.search(r"\b(?:Match starts|Main Match|Data zawodów|Data|Termin)\b", line, re.I):
+            match_date = _parse_date(line)
+            if match_date:
                 break
-    if data_zawodow is None:
+    if match_date is None:
         raise ValueError(
-            f"Nie znaleziono daty zawodów w {sciezka_opisu}; "
+            f"Nie znaleziono daty zawodów w {description_path}; "
             "podaj ją w polu Data zawodów lub Match starts."
         )
 
-    lokalizacja = _wartosc_pola(linie, r"(?:Miejsce|Location)")
-    if not lokalizacja:
-        for indeks, linia in enumerate(linie):
-            if re.match(r"Location\s*:\s*$", linia, re.IGNORECASE):
-                lokalizacja = next((wartosc for wartosc in linie[indeks + 1:] if wartosc), "")
+    location = _field_value(lines, r"(?:Miejsce|Location)")
+    if not location:
+        for index, line in enumerate(lines):
+            if re.match(r"Location\s*:\s*$", line, re.IGNORECASE):
+                location = next((value for value in lines[index + 1:] if value), "")
                 break
-    typ = _wartosc_pola(linie, r"(?:Typ zawodów(?:/Match type)?|Match type)")
-    poziom = _wartosc_pola(linie, r"(?:Poziom(?:/Match level)?|Match level)")
-    return DaneZawodow(nazwa, data_zawodow, lokalizacja, typ, poziom)
+    match_type = _field_value(lines, r"(?:Typ zawodów(?:/Match type)?|Match type)")
+    level = _field_value(lines, r"(?:Poziom(?:/Match level)?|Match level)")
+    return MatchData(name, match_date, location, match_type, level)
 
 
-def generuj_tytul(
-    nazwa_pliku: Union[str, Path], sciezka_opisu: Path = PLIK_OPISU
+def generate_title(
+    file_name: Union[str, Path], description_path: Path = DESCRIPTION_FILE
 ) -> str:
-    dane = czytaj_dane_zawodow(sciezka_opisu)
-    dopasowanie = re.search(r"(?:stage|tor)[\s_-]*(\d+)", Path(nazwa_pliku).stem, re.IGNORECASE)
-    if not dopasowanie:
+    match_data = read_match_data(description_path)
+    match = re.search(r"(?:stage|tor)[\s_-]*(\d+)", Path(file_name).stem, re.IGNORECASE)
+    if not match:
         raise ValueError(
-            f"Nie można odczytać numeru toru z nazwy pliku {Path(nazwa_pliku).name}; "
+            f"Nie można odczytać numeru toru z nazwy pliku {Path(file_name).name}; "
             "oczekiwano np. Gotowe_Stage_3.mp4."
         )
 
-    stala_czesc = f"{dane.data.isoformat()} -  - Tor {dopasowanie.group(1)} #bodycam"
-    limit_nazwy = MAKS_DLUGOSC_TYTULU - len(stala_czesc)
-    if limit_nazwy < 1:
+    fixed_part = f"{match_data.match_date.isoformat()} -  - Tor {match.group(1)} #bodycam"
+    name_limit = MAX_TITLE_LENGTH - len(fixed_part)
+    if name_limit < 1:
         raise ValueError("Data i numer toru nie mieszczą się w limicie długości tytułu YouTube.")
-    nazwa = dane.nazwa[:limit_nazwy].rstrip()
-    return f"{dane.data.isoformat()} - {nazwa} - Tor {dopasowanie.group(1)} #bodycam"
+    name = match_data.name[:name_limit].rstrip()
+    return f"{match_data.match_date.isoformat()} - {name} - Tor {match.group(1)} #bodycam"
 
 
-def _slug_hashtagu(tekst: str) -> str:
-    tekst = tekst.replace("Ł", "L").replace("ł", "l")
-    ascii_tekst = unicodedata.normalize("NFKD", tekst).encode("ascii", "ignore").decode("ascii")
-    slowa = re.findall(r"[A-Za-z][A-Za-z0-9]*", ascii_tekst)
-    return "".join(slowa)
+def _hashtag_slug(text: str) -> str:
+    text = text.replace("Ł", "L").replace("ł", "l")
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[A-Za-z][A-Za-z0-9]*", ascii_text)
+    return "".join(words)
 
 
-def generuj_opis_i_hashtagi(
-    sciezka_opisu: Path = PLIK_OPISU,
+def generate_description_and_hashtags(
+    description_path: Path = DESCRIPTION_FILE,
 ) -> Tuple[str, List[str]]:
-    dane = czytaj_dane_zawodow(sciezka_opisu)
-    hashtagi = ["#IPSC"]
-    for fraza in (dane.typ, dane.lokalizacja, dane.nazwa):
-        for slowo in re.findall(r"[^\W\d_]+", fraza, re.UNICODE):
-            hashtag = _slug_hashtagu(slowo)
+    match_data = read_match_data(description_path)
+    hashtags = ["#IPSC"]
+    for phrase in (match_data.match_type, match_data.location, match_data.name):
+        for word in re.findall(r"[^\W\d_]+", phrase, re.UNICODE):
+            hashtag = _hashtag_slug(word)
             if len(hashtag) >= 3 and hashtag.casefold() not in {
-                tag[1:].casefold() for tag in hashtagi
+                tag[1:].casefold() for tag in hashtags
             }:
-                hashtagi.append(f"#{hashtag}")
-            if len(hashtagi) >= 8:
+                hashtags.append(f"#{hashtag}")
+            if len(hashtags) >= 8:
                 break
-        if len(hashtagi) >= 8:
+        if len(hashtags) >= 8:
             break
 
-    linie_opisu = [dane.nazwa, f"Data zawodów: {dane.data.isoformat()}"]
-    if dane.lokalizacja:
-        linie_opisu.append(f"Miejsce: {dane.lokalizacja}")
-    if dane.typ:
-        linie_opisu.append(f"Typ zawodów: {dane.typ}")
-    if dane.poziom:
-        linie_opisu.append(f"Poziom: {dane.poziom}")
-    return "\n".join(linie_opisu + ["", " ".join(hashtagi)]), hashtagi
+    description_lines = [match_data.name, f"Data zawodów: {match_data.match_date.isoformat()}"]
+    if match_data.location:
+        description_lines.append(f"Miejsce: {match_data.location}")
+    if match_data.match_type:
+        description_lines.append(f"Typ zawodów: {match_data.match_type}")
+    if match_data.level:
+        description_lines.append(f"Poziom: {match_data.level}")
+    return "\n".join(description_lines + ["", " ".join(hashtags)]), hashtags
 
 
-def bezpieczna_nazwa_pliku(tytul: str, rozszerzenie: str) -> str:
-    nazwa = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", tytul)
-    nazwa = re.sub(r"\s+", " ", nazwa).strip(" .")
-    return f"{nazwa}{rozszerzenie.lower()}"
+def safe_file_name(title: str, extension: str) -> str:
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title)
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    return f"{name}{extension.lower()}"
 
 
-def przemianuj_plik(sciezka: Path, tytul: str) -> Path:
-    cel = sciezka.with_name(bezpieczna_nazwa_pliku(tytul, sciezka.suffix))
-    if cel == sciezka:
-        return sciezka
-    if cel.exists():
-        raise FileExistsError(f"Plik docelowy już istnieje: {cel}")
-    return sciezka.rename(cel)
+def rename_file(path: Path, title: str) -> Path:
+    target = path.with_name(safe_file_name(title, path.suffix))
+    if target == path:
+        return path
+    if target.exists():
+        raise FileExistsError(f"Plik docelowy już istnieje: {target}")
+    return path.rename(target)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Nadaje filmowi nazwę według danych zawodów.")
     parser.add_argument("plik", type=Path, help="Plik MP4 zawierający numer toru w nazwie.")
-    parser.add_argument("--opis", type=Path, default=PLIK_OPISU, help="Plik z opisem zawodów.")
+    parser.add_argument("--opis", type=Path, default=DESCRIPTION_FILE, help="Plik z opisem zawodów.")
     args = parser.parse_args()
 
-    tytul = generuj_tytul(args.plik, args.opis)
-    nowa_sciezka = przemianuj_plik(args.plik, tytul)
-    print(f"Tytuł: {tytul}")
-    print(f"Plik: {nowa_sciezka}")
+    title = generate_title(args.plik, args.opis)
+    new_path = rename_file(args.plik, title)
+    print(f"Tytuł: {title}")
+    print(f"Plik: {new_path}")
 
 
 if __name__ == "__main__":
