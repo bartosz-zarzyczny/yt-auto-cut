@@ -66,7 +66,7 @@ Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejnoś
 |---|---|
 | **Główna** | Checkbox **Czy dodać napisy** (domyślnie odznaczony), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
 | **Zawody** | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`) |
-| **Konfiguracja** | Folder z muzyką, ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
+| **Konfiguracja** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 100×100 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube** | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania |
 | **Pomoc** | Przycisk **Test Systemu** oraz ten plik README z formatowaniem |
 

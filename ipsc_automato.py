@@ -13,6 +13,7 @@ from moviepy.config import change_settings
 from timer_detect import zglos_wykrycie_timera
 from timer_trim import trim_video
 from additional_texts import create_text_clips
+from logo_overlay import create_logo_clip
 from track_order import RESOLUTIONS, DEFAULT_RESOLUTION
 from track_mapping import assign_tracks
 from file_migration import move_old_files
@@ -72,6 +73,7 @@ class KonfiguracjaSciezek:
     plik_opisu_zawodow: Path = Path(PLIK_OPISU_ZAWODOW)
     domyslna_orientacja: str = "V"
     dodaj_napisy: bool = True
+    plik_logo: str = ""
 
 # ===================================================================
 # FUNKCJE POMOCNICZE
@@ -234,6 +236,9 @@ def uruchom_automatyzacje(
                 warstwy_napisow += create_text_clips(
                     str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
                 )
+            klip_logo = create_logo_clip(konfiguracja.plik_logo, nowy_czas_trwania, rozdzielczosc[0], raportuj)
+            if klip_logo is not None:
+                warstwy_napisow.append(klip_logo)
             wideo_koncowe = CompositeVideoClip([video, *warstwy_napisow], size=rozdzielczosc).set_fps(30)
             sprawdz_przerwanie()
             
