@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
         ("plik_z_tekstami", "Teksty wideo", "file"),
         ("plik_opisu_zawodow", "Opis zawodów", "file"),
     )
-    SUBTITLE_PATH_KEYS = ("plik_z_wynikami", "plik_z_tekstami")
+    SUBTITLE_PATH_KEYS = ("plik_z_wynikami",)
     EDITORS = (
         ("plik_z_tekstami", "Teksty wideo"),
         ("plik_opisu_zawodow", "Opis zawodów"),
@@ -346,6 +346,9 @@ class MainWindow(QMainWindow):
         self._add_path_field(paths_layout, "folder_wejsciowy", "Nagrania źródłowe", "dir")
         self._add_path_field(paths_layout, "folder_wyjsciowy", "Gotowe filmy", "dir")
         self.subtitles_check = QCheckBox("Czy dodać napisy")
+        self.subtitles_check.setToolTip(
+            "Steruje tylko planszą z wynikami na dole filmu. Teksty wideo zależą od zawartości pliku tekstów."
+        )
         self.subtitles_check.setChecked(
             str(self.settings.value("dodaj_napisy", "false")).lower() == "true"
         )
@@ -402,7 +405,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._create_editor("plik_z_tekstami", "Teksty wideo"))
         layout.addWidget(self._create_editor("plik_opisu_zawodow", "Opis zawodów"))
         layout.addStretch(1)
-        return page
+        page.setObjectName("scrollPage")
+        page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        page.setStyleSheet("QWidget#scrollPage { background: transparent; }")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
 
     def _build_youtube_tab(self):
         page = QWidget()
@@ -853,6 +864,7 @@ class MainWindow(QMainWindow):
 
         editor = QPlainTextEdit()
         editor.setMinimumHeight(125)
+        editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         editor.setPlaceholderText(f"Wpisz lub wklej treść: {title.lower()}…")
         editor.textChanged.connect(partial(self._mark_dirty, key))
         self.editors[key] = editor
@@ -861,12 +873,16 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         status = QLabel("Plik nie został jeszcze wczytany")
         status.setObjectName("fileStatus")
+        status.setWordWrap(True)
         self.editor_status[key] = status
+        layout.addWidget(status)
+
+        controls = QHBoxLayout()
+        controls.addStretch(1)
         load_button = QPushButton("Wczytaj z pliku")
         load_button.clicked.connect(partial(self._load_file, key, True))
         save_button = QPushButton("Zapisz do pliku")
         save_button.clicked.connect(partial(self._save_file, key, True))
-        controls.addWidget(status, 1)
         controls.addWidget(load_button)
         controls.addWidget(save_button)
         layout.addLayout(controls)

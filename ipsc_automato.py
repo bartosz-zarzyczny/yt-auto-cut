@@ -230,10 +230,9 @@ def uruchom_automatyzacje(
             # --- ZMIANA ROZDZIELCZOŚCI (H = 1920x1080, V/domyślnie = 1080x1920) ---
             video = video.resize(newsize=rozdzielczosc)
             # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
-            if konfiguracja.dodaj_napisy:
-                warstwy_napisow += create_text_clips(
-                    str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
-                )
+            warstwy_napisow += create_text_clips(
+                str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
+            )
             wideo_koncowe = CompositeVideoClip([video, *warstwy_napisow], size=rozdzielczosc).set_fps(30)
             sprawdz_przerwanie()
             
