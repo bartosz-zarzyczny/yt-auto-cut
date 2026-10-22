@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -40,6 +41,13 @@ class QueuedVideo:
     video_id: str
     title: str
     scheduled_at: Optional[datetime]
+
+
+def _natural_sort_key(path: Path) -> Tuple[Tuple[int, Any], ...]:
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in re.split(r"(\d+)", path.name)
+    )
 
 
 def nearest_free_slot(
@@ -286,7 +294,7 @@ def process_videos(
     for video in scheduled:
         assert video.scheduled_at is not None
         log(f"[YT] W kolejce: {video.scheduled_at:%Y-%m-%d %H:%M} — {video.title}")
-    for path in paths:
+    for path in sorted(paths, key=_natural_sort_key):
         _check_cancelled(cancel_event)
         if not path.is_file():
             raise FileNotFoundError(f"Nie znaleziono filmu: {path}")

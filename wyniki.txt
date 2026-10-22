@@ -8,7 +8,8 @@
     Guns
     Support
 
-Jaworska Strzelba Dynamiczna 2026 IPSC L1 runda FINAŁOWA IPSC 2026-10-18
+SILESIA CHALLENGE 3 IPSC 2026-08-22
+Target Alfa Silesia
 Horizontal Scroll
 A badge like this 32 next a name shows the number of times score was edited. You can find the edits below the results.
 Zarzyczny, Bartosz
@@ -54,26 +55,26 @@ NS
 Proc
 	
 Apen
-Stage 1 Tor 1		9	65.20%	26.0791	40	2.5924	15.43	Standard Manual		Regular	MAJOR		8							
-Stage 2 Tor 2		6	61.06%	48.8515	80	3.7348	21.42	Standard Manual		Regular	MAJOR		16							
-Stage 3 Tor 3		6	73.84%	103.3746	140	3.8472	36.39	Standard Manual		Regular	MAJOR		28							
-Stage 4 Tor 4		9	69.17%	55.3376	80	3.3970	23.55	Standard Manual		Regular	MAJOR		16							
-Stage 5 Tor 5		7	68.26%	40.9556	60	5.1195	11.72	Standard Manual		Regular	MAJOR		12							
-Stage 6 Tor 6		7	69.20%	51.9006	75	3.6550	20.52	Standard Manual		Regular	MAJOR		15							
-Stage 7 Tor 7		6	63.55%	50.8411	80	4.6729	17.12	Standard Manual		Regular	MAJOR		16							
-Stage 8 Tor 8		7	70.56%	56.4492	80	4.0465	19.77	Standard Manual		Regular	MAJOR		16							
-Stage 9 Tor 9		23	38.90%	15.5603	20	2.1552	9.28	Standard Manual		Regular	MAJOR		8					2		
-Stage 10 Stage 10		5	66.81%	53.4481	80	4.3034	18.59	Standard Manual		Regular	MAJOR		16							
+Stage 1 Stage 1		1	100.00%	120.0000	104	4.5916	22.65	Mini Rifle		Regular	MINOR		22	1	1			1		
+Stage 2 Stage 2		1	100.00%	150.0000	142	6.5108	21.81	Mini Rifle		Regular	MINOR		26	4						
+Stage 3 Stage 3		4	52.57%	60.4595	80	3.8443	20.81	Mini Rifle		Regular	MINOR		15	4	3	1				
+Stage 4 Stage 4		2	97.40%	58.4374	48	4.5889	10.46	Mini Rifle		Regular	MINOR		11	1				1		
+Stage 5 Stage 5		2	87.04%	47.8736	49	6.2580	7.83	Mini Rifle		Regular	MINOR		9	1	1					
+Stage 6 Stage 6		1	100.00%	115.0000	113	7.1837	15.73	Mini Rifle		Regular	MINOR		22	1						
+Stage 7 Stage 7		1	100.00%	145.0000	137	6.9685	19.66	Mini Rifle		Regular	MINOR		26	2	1					
+Stage 8 Stage 8		4	59.98%	32.9916	30	2.8930	10.37	Mini Rifle		Regular	MINOR		5	5		1				
+Stage 9 Stage 9		1	100.00%	55.0000	51	7.0932	7.19	Mini Rifle		Regular	MINOR		9	2						
+Stage 10 Stage 10		2	91.21%	91.2137	92	5.8154	15.82	Mini Rifle		Regular	MINOR		16	4						
 Stage
-Stage 1 Tor 1
-Stage 2 Tor 2
-Stage 3 Tor 3
-Stage 4 Tor 4
-Stage 5 Tor 5
-Stage 6 Tor 6
-Stage 7 Tor 7
-Stage 8 Tor 8
-Stage 9 Tor 9
+Stage 1 Stage 1
+Stage 2 Stage 2
+Stage 3 Stage 3
+Stage 4 Stage 4
+Stage 5 Stage 5
+Stage 6 Stage 6
+Stage 7 Stage 7
+Stage 8 Stage 8
+Stage 9 Stage 9
 Stage 10 Stage 10
 
 Old style results
@@ -82,11 +83,10 @@ Classifier Report for USPSA
 
 Export to WinMSS
 Score Edit History
-Tor 2
-Tor 3
-Tor 4
-Tor 5
-Tor 9
+Stage 1
+Stage 3
+Stage 6
+Stage 7
 Stage 10
 Search links
 

@@ -407,7 +407,7 @@ class MainWindow(QMainWindow):
         logo_layout = QVBoxLayout(logo)
         self._add_path_field(logo_layout, "plik_logo", "Plik logo", "image")
         logo_hint = QLabel(
-            "Logo pojawi się w prawym górnym rogu (maks. 100×100 px, proporcje zachowane). "
+            "Logo pojawi się w prawym górnym rogu (maks. 250×250 px, proporcje zachowane). "
             "Puste pole = bez logo."
         )
         logo_hint.setObjectName("muted")
