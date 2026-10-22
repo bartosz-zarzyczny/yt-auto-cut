@@ -91,6 +91,7 @@ except Exception as import_error:
         plik_opisu_zawodow: Path = Path(PLIK_OPISU_ZAWODOW)
         domyslna_orientacja: str = "V"
         dodaj_napisy: bool = True
+        plik_logo: str = ""
 
 
 class AssemblyWorker(QObject):
@@ -214,6 +215,7 @@ class MainWindow(QMainWindow):
         ("folder_wejsciowy", "Nagrania źródłowe", "dir"),
         ("folder_wyjsciowy", "Gotowe filmy", "dir"),
         ("folder_muzyki", "Muzyka", "dir"),
+        ("plik_logo", "Logo", "image"),
         ("plik_z_wynikami", "Wyniki zawodów", "file"),
         ("plik_z_torami", "Mapowanie torów", "file"),
         ("plik_z_tekstami", "Teksty wideo", "file"),
@@ -401,6 +403,17 @@ class MainWindow(QMainWindow):
         music_layout = QVBoxLayout(music)
         self._add_path_field(music_layout, "folder_muzyki", "Folder z muzyką", "dir")
         layout.addWidget(music)
+        logo = QGroupBox("Logo na filmie")
+        logo_layout = QVBoxLayout(logo)
+        self._add_path_field(logo_layout, "plik_logo", "Plik logo", "image")
+        logo_hint = QLabel(
+            "Logo pojawi się w prawym górnym rogu (maks. 100×100 px, proporcje zachowane). "
+            "Puste pole = bez logo."
+        )
+        logo_hint.setObjectName("muted")
+        logo_hint.setWordWrap(True)
+        logo_layout.addWidget(logo_hint)
+        layout.addWidget(logo)
         layout.addWidget(self._build_imagemagick())
         layout.addWidget(self._create_editor("plik_z_tekstami", "Teksty wideo"))
         layout.addWidget(self._create_editor("plik_opisu_zawodow", "Opis zawodów"))
@@ -903,7 +916,7 @@ class MainWindow(QMainWindow):
         defaults = self._default_paths()
         for key, _, _ in self.PATHS:
             value = fix_path(self.settings.value(key, str(getattr(defaults, key))))
-            self.fields[key].setText(str(value))
+            self.fields[key].setText("" if key == "plik_logo" and value in ("", ".") else str(value))
 
     def _load_startup_files(self):
         for key, _ in self.EDITORS:
@@ -929,6 +942,11 @@ class MainWindow(QMainWindow):
         current = Path(self.fields[key].text().strip() or ".")
         if kind == "dir":
             path = QFileDialog.getExistingDirectory(self, "Wybierz folder", str(current))
+        elif kind == "image":
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Wybierz logo", str(current),
+                "Obrazy (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;Wszystkie pliki (*)",
+            )
         else:
             path, _ = QFileDialog.getOpenFileName(
                 self, "Wybierz plik tekstowy", str(current), "Pliki tekstowe (*.txt);;Wszystkie pliki (*)"
@@ -1015,7 +1033,7 @@ class MainWindow(QMainWindow):
     def _get_config(self) -> KonfiguracjaSciezek:
         return KonfiguracjaSciezek(
             **{
-                key: Path(field.text().strip())
+                key: (field.text().strip() if key == "plik_logo" else Path(field.text().strip()))
                 for key, field in self.fields.items()
             },
             domyslna_orientacja=self._default_orientation(),
