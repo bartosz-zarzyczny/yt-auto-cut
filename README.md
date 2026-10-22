@@ -64,13 +64,15 @@ Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejnoś
 
 | Zakładka | Zawartość |
 |---|---|
-| **Główna** | Checkbox **Czy dodać napisy** (domyślnie odznaczony), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
+| **Główna** | Checkbox **Czy dodać napisy** (domyślnie odznaczony; dotyczy wyłącznie planszy z wynikami na dole filmu), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy |
 | **Zawody** | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`) |
 | **Konfiguracja** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 100×100 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube** | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania |
 | **Pomoc** | Przycisk **Test Systemu** oraz ten plik README z formatowaniem |
 
 **Zapamiętywanie ścieżek.** Wszystkie wybrane foldery i pliki są zapisywane lokalnie dla bieżącego użytkownika (`QSettings`) i przywracane po ponownym uruchomieniu aplikacji.
+
+Zakładka **Konfiguracja** przewija się pionowo, gdy jej zawartość nie mieści się w oknie; status pliku i przyciski edytora mają osobne wiersze, więc nie nachodzą na pole tekstowe.
 
 **Edytory plików TXT.** Pod każdym edytorem jest pole ze ścieżką, przycisk **Przeglądaj…** oraz **Wczytaj z pliku** i **Zapisz do pliku** (kodowanie UTF-8). Zawartość plików wczytuje się automatycznie przy starcie, a po wskazaniu innego pliku od razu. Aplikacja ostrzega przed utratą niezapisanych zmian, a przy starcie montażu sama zapisuje zmienione edytory.
 
@@ -156,7 +158,7 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    * Plik wczytywany jest w UTF-8; w aplikacji desktopowej możesz go wkleić i zapisać bezpośrednio w zakładce **Zawody**.
 
 3. **Dodatkowe teksty u góry wideo (`teksty_wideo.txt`):**
-   Teksty i napisy z wynikami są dodawane tylko wtedy, gdy na zakładce **Główna** zaznaczono **Czy dodać napisy**. Gdy checkbox jest odznaczony, pliki `wyniki.txt` i `teksty_wideo.txt` mogą być puste lub nie wybrane — nie są brane pod uwagę przy napisach, a czas przebiegu z `wyniki.txt` (jeśli jest dostępny) nadal służy do przycięcia filmu.
+   Checkbox **Czy dodać napisy** steruje wyłącznie planszą z wynikami na dole filmu. Teksty z `teksty_wideo.txt` są dodawane niezależnie od checkboxa, jeśli plik zawiera wpisy w nawiasach kwadratowych; pusty plik (lub plik bez takich wpisów) nie dodaje tekstów. Czas przebiegu z `wyniki.txt` nadal służy do przycięcia filmu, jeśli jest dostępny.
    Każdy tekst wpisz w nawiasach kwadratowych, np. `[Klub ZSD]`. Plik może zawierać zero lub kilka wpisów, ale **maksymalnie 5** (kolejne są ignorowane). Nadmiarowe białe znaki w tekście są normalizowane, a puste nawiasy pomijane. Brak pliku nie przerywa montażu — filmy powstaną bez tekstów.
    * Teksty pojawiają się po kolei, neonowym cyjanem z ciemnym obrysem (czcionka Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`), w górnej części wideo, z płynnym pojawianiem i znikaniem (0,4 s).
    * Każdy tekst wyświetla się min. 5 s (max 8 s), a przerwa między tekstami wynosi min. 2 s. Pierwszy tekst startuje po 1 s, a na końcu zostaje 1 s marginesu. Teksty są rozłożone równomiernie na całym filmie (bez długiej pustki na końcu).
