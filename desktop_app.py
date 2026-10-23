@@ -312,7 +312,6 @@ class MainWindow(QMainWindow):
         ("plik_z_torami", "Mapowanie torów", "file"),
         ("plik_z_tekstami", "Teksty wideo", "file"),
         ("plik_opisu_zawodow", "Opis zawodów", "file"),
-        ("buffer_video_list", "Lista filmów Buffer", "file"),
     )
     SUBTITLE_PATH_KEYS = ("plik_z_wynikami",)
     EDITORS = (
@@ -1410,7 +1409,7 @@ class MainWindow(QMainWindow):
 
     def _load_settings(self):
         defaults = self._default_paths()
-        for key, _, _ in self.PATHS:
+        for key in (*(path_key for path_key, _, _ in self.PATHS), "buffer_video_list"):
             default = BUFFER_VIDEO_LIST_PATH if key == "buffer_video_list" else str(getattr(defaults, key))
             value = fix_path(self.settings.value(key, default))
             self.fields[key].setText("" if key == "plik_logo" and value in ("", ".") else str(value))
@@ -1533,11 +1532,12 @@ class MainWindow(QMainWindow):
         return True
 
     def _get_config(self) -> KonfiguracjaSciezek:
+        paths = {
+            key: (self.fields[key].text().strip() if key == "plik_logo" else Path(self.fields[key].text().strip()))
+            for key, _, _ in self.PATHS
+        }
         return KonfiguracjaSciezek(
-            **{
-                key: (field.text().strip() if key == "plik_logo" else Path(field.text().strip()))
-                for key, field in self.fields.items()
-            },
+            **paths,
             domyslna_orientacja=self._default_orientation(),
             dodaj_napisy=self.subtitles_check.isChecked(),
         )
