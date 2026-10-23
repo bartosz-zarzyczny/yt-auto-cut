@@ -159,8 +159,10 @@ class YouTubeWorker(QObject):
         cancel_event: Event,
         schedule: Optional[Dict[int, dt_time]] = None,
         publish_now: bool = False,
+        also_unlisted: bool = False,
     ):
         super().__init__()
+        self.also_unlisted = also_unlisted
         self.folder = folder
         self.description_file = description_file
         self.publish = publish
@@ -188,6 +190,7 @@ class YouTubeWorker(QObject):
                 cancel_event=self.cancel_event,
                 hours=self.schedule,
                 immediate=self.publish_now,
+                also_unlisted=self.also_unlisted,
             )
         except Exception as error:
             if type(error).__name__ == "UploadCancelled":
@@ -464,6 +467,10 @@ class MainWindow(QMainWindow):
 
         self.yt_preview_only = QCheckBox("Tylko podgląd (pokaż tytuły i terminy, bez wysyłania)")
         layout.addWidget(self.yt_preview_only)
+        self.yt_also_unlisted = QCheckBox(
+            "Dodatkowo opublikuj prywatnie (tylko z linkiem, natychmiast) jako osobny film"
+        )
+        layout.addWidget(self.yt_also_unlisted)
 
         bar = QHBoxLayout()
         self.yt_status = QLabel("Gotowy do wysyłania")
@@ -640,6 +647,7 @@ class MainWindow(QMainWindow):
             self.yt_cancel_event,
             publish_times,
             publish_now,
+            self.yt_also_unlisted.isChecked(),
         )
         self.yt_worker.moveToThread(self.yt_thread)
         self.yt_thread.started.connect(self.yt_worker.run)

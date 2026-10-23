@@ -185,15 +185,13 @@ def fetch_queue(
 def _validate_short(path: Path) -> None:
     clip = VideoFileClip(str(path))
     try:
-        if clip.duration is None or clip.duration > MAX_SHORTS_SECONDS:
+        if clip.duration is None:
+            raise ValueError(f"{path.name}: nie można odczytać długości filmu.")
+        # Poziome filmy (1920x1080) trafiają na YouTube jako zwykłe wideo, bez limitu Shorts
+        if clip.h >= clip.w and clip.duration > MAX_SHORTS_SECONDS:
             raise ValueError(
                 f"{path.name}: Shorts muszą mieć maksymalnie "
                 f"{MAX_SHORTS_SECONDS} sekund."
-            )
-        if clip.h < clip.w:
-            raise ValueError(
-                f"{path.name}: Short musi mieć format pionowy lub kwadratowy "
-                f"(plik ma {clip.w}x{clip.h})."
             )
     finally:
         clip.close()
@@ -243,11 +241,12 @@ def _upload_video(
     description: str,
     scheduled_at: Optional[datetime],
     cancel_event: Optional[Any] = None,
+    unlisted: bool = False,
 ) -> str:
     from googleapiclient.http import MediaFileUpload
 
-    status: Dict[str, Any] = {"privacyStatus": "public"}
-    if scheduled_at is not None:
+    status: Dict[str, Any] = {"privacyStatus": "unlisted" if unlisted else "public"}
+    if scheduled_at is not None and not unlisted:
         status = {
             "privacyStatus": "private",
             "publishAt": scheduled_at.astimezone(TIME_ZONE).isoformat(),
@@ -288,9 +287,11 @@ def process_videos(
     cancel_event: Optional[Any] = None,
     hours: Optional[Dict[int, time]] = None,
     immediate: bool = False,
+    also_unlisted: bool = False,
 ) -> None:
     taken_dates, scheduled, existing_titles = fetch_queue(youtube, channel)
     state = _load_state(state_file)
+    unlisted_links: List[Tuple[str, str]] = []
     for video in scheduled:
         assert video.scheduled_at is not None
         log(f"[YT] W kolejce: {video.scheduled_at:%Y-%m-%d %H:%M} — {video.title}")
@@ -321,6 +322,14 @@ def process_videos(
             state[content_hash] = {"videoId": video_id, "title": title}
             _save_state(state_file, state)
             log(f"[YT] Wysłano {path.name}: https://youtu.be/{video_id}")
+            if also_unlisted:
+                log(f"[YT] Wysyłanie wersji prywatnej (tylko z linkiem): {path.name}…")
+                unlisted_id = _upload_video(
+                    youtube, path, title, description, None, cancel_event, unlisted=True
+                )
+                state[content_hash]["unlistedVideoId"] = unlisted_id
+                _save_state(state_file, state)
+                unlisted_links.append((title, f"https://youtu.be/{unlisted_id}"))
         elif scheduled_at is None:
             log(f"[PODGLĄD] {title} — publikacja od razu")
         else:
@@ -328,6 +337,10 @@ def process_videos(
         if scheduled_at is not None:
             taken_dates.add(scheduled_at.date())
         existing_titles.add(title.casefold())
+    if unlisted_links:
+        log("[YT] Lista prywatnych linków:")
+        for link_title, link in unlisted_links:
+            log(f"[YT] {link_title} — {link}")
 
 
 def upload_videos(
@@ -339,6 +352,7 @@ def upload_videos(
     cancel_event: Optional[Any] = None,
     hours: Optional[Dict[int, time]] = None,
     immediate: bool = False,
+    also_unlisted: bool = False,
 ) -> None:
     youtube = _authorize(client_secrets, TOKEN_FILE)
     _check_cancelled(cancel_event)
@@ -347,6 +361,7 @@ def upload_videos(
     process_videos(
         videos, youtube, channel, publish, description_file,
         log=log, cancel_event=cancel_event, hours=hours, immediate=immediate,
+        also_unlisted=also_unlisted,
     )
 
 
