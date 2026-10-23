@@ -1,4 +1,4 @@
-"""Tworzenie szkiców postów w Buffer na podstawie listy linków YouTube."""
+"""Tworzenie szkiców postów w Buffer na podstawie listy publicznych adresów plików wideo (np. Cloudflare R2)."""
 import json
 import re
 import time
@@ -38,25 +38,19 @@ TYPED_SERVICES = {PLATFORM_FACEBOOK: "facebook", PLATFORM_INSTAGRAM: "instagram"
 INSTAGRAM_MAX_HASHTAGS = 5
 X_MAX_CHARS = 280
 X_URL_LENGTH = 23
-LINK_PLACEHOLDER = "https://youtu.be/XXXXXXXXXXX"
-LINK_SEPARATOR = "\n\n"
 
 URL_PATTERN = re.compile(r"https?://\S+")
 HASHTAG_PATTERN = re.compile(r"#\w+")
 
 
 def parse_video_links(text: str) -> List[str]:
-    """Zwraca linki z tekstu w kolejności pojawiania się, bez duplikatów."""
+    """Zwraca adresy plików wideo z tekstu w kolejności pojawiania się, bez duplikatów."""
     links: List[str] = []
     for match in URL_PATTERN.findall(text):
         link = match.rstrip(".,;)")
         if link not in links:
             links.append(link)
     return links
-
-
-def build_post_text(description: str, link: str) -> str:
-    return f"{description.strip()}{LINK_SEPARATOR}{link}"
 
 
 def count_hashtags(text: str) -> int:
@@ -73,15 +67,13 @@ def find_text_problems(platforms: Sequence[str], descriptions: Dict[str, str]) -
     """Zwraca komunikaty (po polsku) o przekroczonych limitach dla wybranych platform."""
     problems: List[str] = []
     if PLATFORM_INSTAGRAM in platforms:
-        text = build_post_text(descriptions.get(PLATFORM_INSTAGRAM, ""), LINK_PLACEHOLDER)
-        hashtags = count_hashtags(text)
+        hashtags = count_hashtags(descriptions.get(PLATFORM_INSTAGRAM, ""))
         if hashtags > INSTAGRAM_MAX_HASHTAGS:
             problems.append(
                 f"Opis na Instagram ma {hashtags} hashtagów, a limit to {INSTAGRAM_MAX_HASHTAGS}."
             )
     if PLATFORM_X in platforms:
-        text = build_post_text(descriptions.get(PLATFORM_X, ""), LINK_PLACEHOLDER)
-        length = x_text_length(text)
+        length = x_text_length(descriptions.get(PLATFORM_X, "").strip())
         if length > X_MAX_CHARS:
             problems.append(f"Opis na X/Twitter ma {length} znaków, a limit to {X_MAX_CHARS}.")
     return problems
@@ -193,11 +185,13 @@ def send_drafts(
         else:
             slot = nearest_free_slot(taken, now, hours)
             taken.add(slot.date())
-        text_by_platform = {p: build_post_text(descriptions.get(p, ""), link) for p in pending}
+        text_by_platform = {p: descriptions.get(p, "").strip() for p in pending}
         log(f"[Buffer] {link} -> termin {slot:%Y-%m-%d %H:%M}")
         for platform in pending:
             metadata = build_metadata(platform, post_types)
-            post_id = create_draft(token, channel_ids[platform], text_by_platform[platform], slot, metadata)
+            post_id = create_draft(
+                token, channel_ids[platform], text_by_platform[platform], slot, link, metadata
+            )
             state[f"{platform}|{link}"] = {
                 "postId": post_id,
                 "dueAt": slot.isoformat(),

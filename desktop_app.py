@@ -46,6 +46,7 @@ from app_settings import (
     SETTINGS_FILE,
     ensure_settings_file,
     saved_buffer_api_key,
+    saved_cloudflare_settings,
     saved_imagemagick_path,
     save_imagemagick_path,
 )
@@ -254,6 +255,42 @@ class BufferWorker(QObject):
         self.completed.emit(True, f"Gotowe. Utworzono szkiców: {created}, pominięto: {skipped}.")
 
 
+class CloudflareWorker(QObject):
+    log = Signal(str)
+    uploaded = Signal(str)
+    completed = Signal(bool, str)
+
+    def __init__(self, values: dict, folder: Path, list_path: Path, cancel_event: Event):
+        super().__init__()
+        self.values = values
+        self.folder = folder
+        self.list_path = list_path
+        self.cancel_event = cancel_event
+
+    def run(self):
+        try:
+            import cloudflare_upload
+
+            config = cloudflare_upload.build_config(self.values)
+            sent, existing, failed = cloudflare_upload.upload_folder(
+                config,
+                self.folder,
+                self.list_path,
+                self.log.emit,
+                self.uploaded.emit,
+                is_cancelled=self.cancel_event.is_set,
+            )
+        except Exception as error:
+            self.log.emit(f"[Cloudflare] BŁĄD: {error}")
+            self.completed.emit(False, f"Wysyłanie do Cloudflare nie powiodło się: {error}")
+            return
+        if self.cancel_event.is_set():
+            self.completed.emit(False, "Wysyłanie do Cloudflare przerwano przez użytkownika.")
+            return
+        message = f"Gotowe. Wysłano: {sent}, już istniały: {existing}, błędy: {failed}."
+        self.completed.emit(failed == 0, message)
+
+
 class SystemCheckWorker(QObject):
     finished = Signal(str, bool)
 
@@ -302,6 +339,9 @@ class MainWindow(QMainWindow):
         self.buffer_thread: Optional[QThread] = None
         self.buffer_worker: Optional[BufferWorker] = None
         self.buffer_cancel_event: Optional[Event] = None
+        self.cloudflare_thread: Optional[QThread] = None
+        self.cloudflare_worker: Optional[CloudflareWorker] = None
+        self.cloudflare_cancel_event: Optional[Event] = None
         self.job_complete = False
         self.test_thread: Optional[QThread] = None
         self.test_worker: Optional[SystemCheckWorker] = None
@@ -607,6 +647,7 @@ class MainWindow(QMainWindow):
         )
 
         layout.addWidget(self._create_editor("buffer_video_list", "Lista filmów Buffer"))
+        layout.addWidget(self._build_cloudflare_group())
 
         layout.addWidget(self._build_buffer_schedule())
 
@@ -943,7 +984,7 @@ class MainWindow(QMainWindow):
             return
         links = parse_video_links(self.editors["buffer_video_list"].toPlainText())
         if not links:
-            QMessageBox.warning(self, "Buffer", "Lista filmów Buffer nie zawiera żadnych linków.")
+            QMessageBox.warning(self, "Buffer", "Lista filmów Buffer nie zawiera żadnych adresów plików wideo.")
             return
         descriptions = self._buffer_descriptions()
         empty = [PLATFORM_LABELS[platform] for platform in platforms if not descriptions[platform]]
@@ -1010,6 +1051,126 @@ class MainWindow(QMainWindow):
         self.buffer_worker = None
         self.buffer_thread = None
         self.buffer_send.setEnabled(True)
+
+    def _build_cloudflare_group(self) -> QGroupBox:
+        group = QGroupBox("Wysyłka filmów do Cloudflare")
+        layout = QVBoxLayout(group)
+        row = QHBoxLayout()
+        label = QLabel("Folder z filmami")
+        label.setMinimumWidth(150)
+        self.cloudflare_folder = QLineEdit(str(self.settings.value("folder_cloudflare", FOLDER_WYJSCIOWY)))
+        browse_button = QPushButton("Przeglądaj…")
+        browse_button.clicked.connect(self._choose_cloudflare_folder)
+        row.addWidget(label)
+        row.addWidget(self.cloudflare_folder, 1)
+        row.addWidget(browse_button)
+        layout.addLayout(row)
+
+        bar = QHBoxLayout()
+        self.cloudflare_status = QLabel("Gotowe do wysyłki")
+        self.cloudflare_status.setObjectName("muted")
+        self.cloudflare_send = QPushButton("⬆  Wyślij do CloudFlare")
+        self.cloudflare_send.setMinimumHeight(40)
+        self.cloudflare_send.clicked.connect(self._send_to_cloudflare)
+        self.cloudflare_cancel = QPushButton("Przerwij")
+        self.cloudflare_cancel.setObjectName("danger")
+        self.cloudflare_cancel.setMinimumHeight(40)
+        self.cloudflare_cancel.setEnabled(False)
+        self.cloudflare_cancel.clicked.connect(self._cancel_cloudflare)
+        bar.addWidget(self.cloudflare_status, 1)
+        bar.addWidget(self.cloudflare_send)
+        bar.addWidget(self.cloudflare_cancel)
+        layout.addLayout(bar)
+
+        self.cloudflare_log = QPlainTextEdit()
+        self.cloudflare_log.setReadOnly(True)
+        self.cloudflare_log.setPlaceholderText("Tutaj pojawią się komunikaty z wysyłki do Cloudflare.")
+        self.cloudflare_log.setMinimumHeight(110)
+        layout.addWidget(self.cloudflare_log)
+        return group
+
+    def _choose_cloudflare_folder(self, checked: bool = False):
+        del checked
+        start = self.cloudflare_folder.text().strip() or FOLDER_WYJSCIOWY
+        chosen = QFileDialog.getExistingDirectory(self, "Folder z filmami do wysłania na Cloudflare", start)
+        if chosen:
+            self.cloudflare_folder.setText(chosen)
+            self.settings.setValue("folder_cloudflare", chosen)
+
+    def _send_to_cloudflare(self, checked: bool = False):
+        del checked
+        from cloudflare_upload import CloudflareUploadError, build_config
+
+        try:
+            config_values = saved_cloudflare_settings()
+            build_config(config_values)
+        except CloudflareUploadError as error:
+            QMessageBox.warning(self, "Cloudflare", str(error))
+            return
+        folder = Path(self.cloudflare_folder.text().strip())
+        if not folder.is_dir():
+            QMessageBox.warning(self, "Cloudflare", "Wybrany folder nie istnieje.")
+            return
+        list_path = Path(self.fields["buffer_video_list"].text().strip())
+        if not list_path.name:
+            QMessageBox.warning(self, "Cloudflare", "Wskaż plik listy filmów Buffer.")
+            return
+        self.settings.setValue("folder_cloudflare", str(folder))
+
+        self.cloudflare_log.clear()
+        self.cloudflare_status.setText("Wysyłanie do Cloudflare…")
+        self.cloudflare_send.setEnabled(False)
+        self.cloudflare_cancel.setEnabled(True)
+        self.cloudflare_cancel_event = Event()
+        self.cloudflare_thread = QThread(self)
+        self.cloudflare_worker = CloudflareWorker(
+            config_values, folder, list_path, self.cloudflare_cancel_event
+        )
+        self.cloudflare_worker.moveToThread(self.cloudflare_thread)
+        self.cloudflare_thread.started.connect(self.cloudflare_worker.run)
+        self.cloudflare_worker.log.connect(self.cloudflare_log.appendPlainText)
+        self.cloudflare_worker.uploaded.connect(self._on_cloudflare_link)
+        self.cloudflare_worker.completed.connect(self._finish_cloudflare)
+        self.cloudflare_worker.completed.connect(self.cloudflare_thread.quit)
+        self.cloudflare_worker.completed.connect(self.cloudflare_worker.deleteLater)
+        self.cloudflare_thread.finished.connect(self.cloudflare_thread.deleteLater)
+        self.cloudflare_thread.finished.connect(self._cleanup_cloudflare)
+        self.cloudflare_thread.start()
+
+    def _on_cloudflare_link(self, link: str):
+        # Plik listy zapisuje wątek; edytor dopisuje ten sam link bez oznaczania go jako zmienionego.
+        editor = self.editors["buffer_video_list"]
+        text = editor.toPlainText()
+        if link in text.split():
+            return
+        separator = "" if not text or text.endswith("\n") else "\n"
+        editor.blockSignals(True)
+        try:
+            editor.setPlainText(f"{text}{separator}{link}\n")
+        finally:
+            editor.blockSignals(False)
+
+    def _cancel_cloudflare(self, checked: bool = False):
+        del checked
+        if self.cloudflare_cancel_event is None or self.cloudflare_cancel_event.is_set():
+            return
+        self.cloudflare_cancel_event.set()
+        self.cloudflare_cancel.setEnabled(False)
+        self.cloudflare_status.setText("Przerywanie…")
+        self.cloudflare_log.appendPlainText("Żądanie przerwania wysłane. Zatrzymanie nastąpi po bieżącym pliku.")
+
+    def _finish_cloudflare(self, success: bool, message: str):
+        self.cloudflare_status.setText(message)
+        self.cloudflare_log.appendPlainText(message)
+        if not success and "przerwano" not in message.lower():
+            QMessageBox.warning(self, "Cloudflare", message)
+
+    def _cleanup_cloudflare(self):
+        self.cloudflare_worker = None
+        self.cloudflare_thread = None
+        self.cloudflare_cancel_event = None
+        self.cloudflare_send.setEnabled(True)
+        self.cloudflare_cancel.setEnabled(False)
 
     def _build_imagemagick(self):
         group = QGroupBox("ImageMagick (napisy)")
@@ -1509,6 +1670,14 @@ class MainWindow(QMainWindow):
                 self,
                 "Tworzenie szkiców w toku",
                 "Przerwij tworzenie szkiców w Buffer i poczekaj na jego zakończenie przed zamknięciem aplikacji.",
+            )
+            event.ignore()
+            return
+        if self.cloudflare_thread and self.cloudflare_thread.isRunning():
+            QMessageBox.information(
+                self,
+                "Wysyłanie do Cloudflare w toku",
+                "Przerwij wysyłkę do Cloudflare i poczekaj na jej zakończenie przed zamknięciem aplikacji.",
             )
             event.ignore()
             return

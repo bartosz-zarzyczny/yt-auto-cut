@@ -102,9 +102,13 @@ def create_draft(
     channel_id: str,
     text: str,
     due_at: datetime,
+    video_url: str,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Tworzy szkic posta (bez publikacji) z terminem `due_at`; zwraca identyfikator posta."""
+    """Tworzy szkic posta (bez publikacji) z wideo z `video_url` i terminem `due_at`; zwraca identyfikator posta.
+
+    Buffer pobiera plik z publicznego adresu w chwili publikacji, dlatego URL musi być trwały.
+    """
     post_input: Dict[str, Any] = {
         "text": text,
         "channelId": channel_id,
@@ -112,6 +116,7 @@ def create_draft(
         "mode": "customScheduled",
         "dueAt": due_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "saveToDraft": True,
+        "assets": [{"video": {"url": video_url}}],
     }
     if metadata:
         post_input["metadata"] = metadata

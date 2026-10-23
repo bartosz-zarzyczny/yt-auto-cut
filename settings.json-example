@@ -1,4 +1,8 @@
 {
   "imagemagick_path": "C:\\Program Files\\ImageMagick-7.1.2-Q16-HDRI\\magick.exe",
-  "BUFFER_API":""
+  "BUFFER_API":"",
+  "CLOUDFLARE_API":"",
+  "CLOUDFLARE_ACCESS_KEY_ID":"",
+  "CLOUDFLARE_SECRET_ACCESS_KEY":"",
+  "CLOUDFLARE_PUBLIC_URL":""
 }

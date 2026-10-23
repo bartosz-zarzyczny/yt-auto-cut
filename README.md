@@ -68,8 +68,7 @@ Interfejs w ciemnym motywie jest podzielony na sześć zakładek (w tej kolejno�
 | **Zawody**       | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`)                                                                                                                                                                                                                                                             |
 | **Konfiguracja** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 100×100 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube**      | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania                                                                                                                                                                                 |
-| **Buffer**       | Checkboxy platform **Facebook**, **Instagram**, **X/Twitter** (dla Facebooka i Instagrama lista typu posta: **reel**, **post**, **story**, domyślnie **reel**), osobne pola **Opis na Facebook**, **Opis na Instagram** (licznik hashtagów, limit 5) i **Opis na X/Twitter** (licznik znaków, limit 280), edytor **Lista filmów Buffer** (`buffer.txt`) z przyciskami **Wczytaj z pliku** / **Zapisz do pliku** oraz wyborem pliku (ścieżka jest zapamiętywana), sekcja **PLANOWANIE SZKICÓW** (te same dni i godziny co w YouTube) i przycisk **Utwórz szkice w Buffer** — tworzy wyłącznie szkice (bez publikacji) w pierwszych wolnych terminach, a wysłane pary platforma + link są pomijane (rejestr `buffer_upload_state.json`) |
-| **Pomoc**        | Przycisk **Test Systemu** oraz ten plik README z formatowaniem                                                                                                                                                                                                                                                                                                                                    |
+| **Buffer**       | Checkboxy platform **Facebook**, **Instagram**, **X/Twitter** (dla Facebooka i Instagrama lista typu posta: **reel**, **post**, **story**, domyślnie **reel**), osobne pola **Opis na Facebook**, **Opis na Instagram** (licznik hashtagów, limit 5) i **Opis na X/Twitter** (licznik znaków, limit 280), edytor **Lista filmów Buffer** (`buffer.txt`) z przyciskami **Wczytaj z pliku** / **Zapisz do pliku** oraz wyborem pliku (ścieżka jest zapamiętywana), sekcja **PLANOWANIE SZKICÓW** (te same dni i godziny co w YouTube) i przycisk **Utwórz szkice w Buffer** — tworzy wyłącznie szkice (bez publikacji) w pierwszych wolnych terminach. Każdy adres z listy (np. publiczny link Cloudflare R2) jest dołączany do posta jako plik wideo (Buffer pobiera go z tego adresu), a treść posta to sam opis, bez linku. Wysłane pary platforma + film są pomijane (rejestr `buffer_upload_state.json`). Przycisk **Wyślij do CloudFlare** pod edytorem: wysyła pliki MP4 z wybranego folderu (domyślnie **Gotowe**, zmiana przyciskiem **Przeglądaj…**) do bucketa Cloudflare R2 i na bieżąco dopisuje ich publiczne linki do `buffer.txt` (pliki o już istniejącej nazwie w buckecie nie są wysyłane ponownie) || **Pomoc**        | Przycisk **Test Systemu** oraz ten plik README z formatowaniem                                                                                                                                                                                                                                                                                                                                    |
 
 **Zapamiętywanie ścieżek.** Wszystkie wybrane foldery i pliki są zapisywane lokalnie dla bieżącego użytkownika (`QSettings`) i przywracane po ponownym uruchomieniu aplikacji.
 
@@ -116,6 +115,18 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    {
      "imagemagick_path": "C:\\Program Files\\ImageMagick-7.1.2-Q16-HDRI\\magick.exe",
      "BUFFER_API": "TWOJ_TOKEN_BUFFER"
+   }
+   ```
+
+2a. **Cloudflare R2 (wysyłka filmów z zakładki Buffer):**
+   W pliku **`settings.json`** uzupełnij klucze: `CLOUDFLARE_API` (endpoint S3 z nazwą bucketa, np. `https://<ID_KONTA>.r2.cloudflarestorage.com/buffer-api`), `CLOUDFLARE_ACCESS_KEY_ID` i `CLOUDFLARE_SECRET_ACCESS_KEY` (klucze R2 API Token) oraz `CLOUDFLARE_PUBLIC_URL` — publiczny adres bucketa, np. `https://pub-xxxx.r2.dev`. Publiczny adres włączysz w Cloudflare: **R2 → buffer-api → Settings → Public access** (albo podepnij własną domenę). Endpoint S3 **nie** nadaje się jako `CLOUDFLARE_PUBLIC_URL`, bo nie udostępnia plików publicznie.
+
+   ```json
+   {
+     "CLOUDFLARE_API": "https://<ID_KONTA>.r2.cloudflarestorage.com/buffer-api",
+     "CLOUDFLARE_ACCESS_KEY_ID": "TWOJ_ACCESS_KEY_ID",
+     "CLOUDFLARE_SECRET_ACCESS_KEY": "TWOJ_SECRET_ACCESS_KEY",
+     "CLOUDFLARE_PUBLIC_URL": "https://pub-xxxx.r2.dev"
    }
    ```
 
