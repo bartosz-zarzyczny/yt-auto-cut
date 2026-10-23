@@ -302,11 +302,26 @@ def process_videos(
         _validate_short(path)
         title = generate_title(path, description_file)
         content_hash = _file_hash(path)
-        if content_hash in state:
-            log(f"[YT] Pominięto film już wysłany: {path.name}")
-            continue
-        if title.casefold() in existing_titles:
-            log(f"[YT] Pominięto film o istniejącym tytule: {title}")
+        known = state.get(content_hash)
+        already_sent = known is not None
+        title_exists = title.casefold() in existing_titles
+        if already_sent or title_exists:
+            reason = "już wysłany" if already_sent else "o istniejącym tytule"
+            needs_unlisted = also_unlisted and not (known or {}).get("unlistedVideoId")
+            if not needs_unlisted:
+                log(f"[YT] Pominięto film {reason}: {path.name}")
+                continue
+            if not publish:
+                log(f"[PODGLĄD] {title} — tylko wersja prywatna ({reason})")
+                continue
+            description, _ = generate_description_and_hashtags(description_file)
+            log(f"[YT] Film {reason} — wysyłanie tylko wersji prywatnej: {path.name}…")
+            unlisted_id = _upload_video(
+                youtube, path, title, description, None, cancel_event, unlisted=True
+            )
+            state.setdefault(content_hash, {"title": title})["unlistedVideoId"] = unlisted_id
+            _save_state(state_file, state)
+            unlisted_links.append((title, f"https://youtu.be/{unlisted_id}"))
             continue
 
         scheduled_at = None
