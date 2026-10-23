@@ -234,5 +234,6 @@ logs/*
 youtube_client_secret.json
 youtube_token.json
 youtube_upload_state.json
+buffer_upload_state.json
 zsd-logo.png
 settings.json

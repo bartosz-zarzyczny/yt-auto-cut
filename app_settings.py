@@ -7,6 +7,7 @@ from pathlib import Path
 
 SETTINGS_FILE = Path(__file__).resolve().parent / "settings.json"
 KEY_IMAGEMAGICK = "imagemagick_path"
+KEY_BUFFER_API = "BUFFER_API"
 IMAGEMAGICK_DEFAULT_WINDOWS = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 
 
@@ -45,6 +46,10 @@ def ensure_settings_file(file_path=SETTINGS_FILE):
 
 def saved_imagemagick_path(file_path=SETTINGS_FILE):
     return str(load_settings(file_path).get(KEY_IMAGEMAGICK) or "").strip()
+
+
+def saved_buffer_api_key(file_path=SETTINGS_FILE):
+    return str(load_settings(file_path).get(KEY_BUFFER_API) or "").strip()
 
 
 def save_imagemagick_path(path, file_path=SETTINGS_FILE):

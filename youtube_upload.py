@@ -291,7 +291,7 @@ def process_videos(
 ) -> None:
     taken_dates, scheduled, existing_titles = fetch_queue(youtube, channel)
     state = _load_state(state_file)
-    unlisted_links: List[Tuple[str, str]] = []
+    unlisted_links: List[str] = []
     for video in scheduled:
         assert video.scheduled_at is not None
         log(f"[YT] W kolejce: {video.scheduled_at:%Y-%m-%d %H:%M} — {video.title}")
@@ -321,7 +321,7 @@ def process_videos(
             )
             state.setdefault(content_hash, {"title": title})["unlistedVideoId"] = unlisted_id
             _save_state(state_file, state)
-            unlisted_links.append((title, f"https://youtu.be/{unlisted_id}"))
+            unlisted_links.append(f"https://youtu.be/{unlisted_id}")
             continue
 
         scheduled_at = None
@@ -344,7 +344,7 @@ def process_videos(
                 )
                 state[content_hash]["unlistedVideoId"] = unlisted_id
                 _save_state(state_file, state)
-                unlisted_links.append((title, f"https://youtu.be/{unlisted_id}"))
+                unlisted_links.append(f"https://youtu.be/{unlisted_id}")
         elif scheduled_at is None:
             log(f"[PODGLĄD] {title} — publikacja od razu")
         else:
@@ -354,8 +354,8 @@ def process_videos(
         existing_titles.add(title.casefold())
     if unlisted_links:
         log("[YT] Lista prywatnych linków:")
-        for link_title, link in unlisted_links:
-            log(f"[YT] {link_title} — {link}")
+        for link in unlisted_links:
+            log(link)
 
 
 def upload_videos(

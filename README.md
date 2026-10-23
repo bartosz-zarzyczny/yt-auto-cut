@@ -60,7 +60,7 @@ Po zainstalowaniu zależności uruchom aplikację poleceniem:
 python desktop_app.py
 ```
 
-Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejności):
+Interfejs w ciemnym motywie jest podzielony na sześć zakładek (w tej kolejności):
 
 | Zakładka         | Zawartość                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -68,6 +68,7 @@ Interfejs w ciemnym motywie jest podzielony na pięć zakładek (w tej kolejnoś
 | **Zawody**       | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`)                                                                                                                                                                                                                                                             |
 | **Konfiguracja** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 100×100 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube**      | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania                                                                                                                                                                                 |
+| **Buffer**       | Checkboxy platform **Facebook**, **Instagram**, **X/Twitter** (dla Facebooka i Instagrama lista typu posta: **reel**, **post**, **story**, domyślnie **reel**), osobne pola **Opis na Facebook**, **Opis na Instagram** (licznik hashtagów, limit 5) i **Opis na X/Twitter** (licznik znaków, limit 280), edytor **Lista filmów Buffer** (`buffer.txt`) z przyciskami **Wczytaj z pliku** / **Zapisz do pliku** oraz wyborem pliku (ścieżka jest zapamiętywana), sekcja **PLANOWANIE SZKICÓW** (te same dni i godziny co w YouTube) i przycisk **Utwórz szkice w Buffer** — tworzy wyłącznie szkice (bez publikacji) w pierwszych wolnych terminach, a wysłane pary platforma + link są pomijane (rejestr `buffer_upload_state.json`) |
 | **Pomoc**        | Przycisk **Test Systemu** oraz ten plik README z formatowaniem                                                                                                                                                                                                                                                                                                                                    |
 
 **Zapamiętywanie ścieżek.** Wszystkie wybrane foldery i pliki są zapisywane lokalnie dla bieżącego użytkownika (`QSettings`) i przywracane po ponownym uruchomieniu aplikacji.
@@ -108,7 +109,17 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
    }
    ```
 
-2. **Ścieżki do folderów roboczych:**
+2. **Klucz Buffer API (zakładka Buffer):**
+   Token do Buffer API wpisz w pliku **`settings.json`** w katalogu projektu, pod kluczem `BUFFER_API`. Plik jest lokalny dla komputera (ignorowany przez Git), a wartości nie ma w interfejsie aplikacji, więc edytuj go w notatniku lub dowolnym edytorze. Informacje o uzyskaniu tokenu znajdziesz w dokumentacji Buffer API: https://developers.buffer.com/. Bez tego wpisu zakładka Buffer nie utworzy szkiców.
+
+   ```json
+   {
+     "imagemagick_path": "C:\\Program Files\\ImageMagick-7.1.2-Q16-HDRI\\magick.exe",
+     "BUFFER_API": "TWOJ_TOKEN_BUFFER"
+   }
+   ```
+
+3. **Ścieżki do folderów roboczych:**
    Domyślnie są **względne** – liczone od folderu ze skryptem (`PROJECT_DIR`), więc projekt działa na Windows, macOS i Linuksie po skopiowaniu w dowolne miejsce:
 
    ```python

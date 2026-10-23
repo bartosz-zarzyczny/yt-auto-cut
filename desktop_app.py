@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -44,6 +45,7 @@ from file_migration import fix_path, move_old_files
 from app_settings import (
     SETTINGS_FILE,
     ensure_settings_file,
+    saved_buffer_api_key,
     saved_imagemagick_path,
     save_imagemagick_path,
 )
@@ -92,6 +94,9 @@ except Exception as import_error:
         domyslna_orientacja: str = "V"
         dodaj_napisy: bool = True
         plik_logo: str = ""
+
+
+BUFFER_VIDEO_LIST_PATH = str(PROJECT_DIR / "buffer.txt")
 
 
 class AssemblyWorker(QObject):
@@ -202,6 +207,53 @@ class YouTubeWorker(QObject):
         self.completed.emit(True, "Wysyłanie zakończone." if self.publish else "Podgląd zakończony.")
 
 
+class BufferWorker(QObject):
+    log = Signal(str)
+    completed = Signal(bool, str)
+
+    def __init__(
+        self,
+        token: str,
+        links: list,
+        platforms: list,
+        descriptions: Dict[str, str],
+        hours: Optional[Dict[int, dt_time]],
+        post_types: Dict[str, str],
+        cancel_event: Event,
+    ):
+        super().__init__()
+        self.token = token
+        self.links = links
+        self.platforms = platforms
+        self.descriptions = descriptions
+        self.hours = hours
+        self.post_types = post_types
+        self.cancel_event = cancel_event
+
+    def run(self):
+        try:
+            import buffer_upload
+
+            created, skipped = buffer_upload.send_drafts(
+                self.token,
+                self.links,
+                self.platforms,
+                self.descriptions,
+                self.hours,
+                self.log.emit,
+                is_cancelled=self.cancel_event.is_set,
+                post_types=self.post_types,
+            )
+        except Exception as error:
+            self.log.emit(f"[Buffer] BŁĄD: {error}")
+            self.completed.emit(False, f"Tworzenie szkiców nie powiodło się: {error}")
+            return
+        if self.cancel_event.is_set():
+            self.completed.emit(False, "Tworzenie szkiców przerwano przez użytkownika.")
+            return
+        self.completed.emit(True, f"Gotowe. Utworzono szkiców: {created}, pominięto: {skipped}.")
+
+
 class SystemCheckWorker(QObject):
     finished = Signal(str, bool)
 
@@ -223,6 +275,7 @@ class MainWindow(QMainWindow):
         ("plik_z_torami", "Mapowanie torów", "file"),
         ("plik_z_tekstami", "Teksty wideo", "file"),
         ("plik_opisu_zawodow", "Opis zawodów", "file"),
+        ("buffer_video_list", "Lista filmów Buffer", "file"),
     )
     SUBTITLE_PATH_KEYS = ("plik_z_wynikami",)
     EDITORS = (
@@ -230,6 +283,7 @@ class MainWindow(QMainWindow):
         ("plik_opisu_zawodow", "Opis zawodów"),
         ("plik_z_torami", "Mapowanie torów"),
         ("plik_z_wynikami", "Wyniki zawodów"),
+        ("buffer_video_list", "Lista filmów Buffer"),
     )
 
     def __init__(self):
@@ -245,6 +299,9 @@ class MainWindow(QMainWindow):
         self.yt_thread: Optional[QThread] = None
         self.yt_worker: Optional[YouTubeWorker] = None
         self.yt_cancel_event: Optional[Event] = None
+        self.buffer_thread: Optional[QThread] = None
+        self.buffer_worker: Optional[BufferWorker] = None
+        self.buffer_cancel_event: Optional[Event] = None
         self.job_complete = False
         self.test_thread: Optional[QThread] = None
         self.test_worker: Optional[SystemCheckWorker] = None
@@ -287,6 +344,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_competition, "  Zawody  ")
         self.tabs.addTab(self.tab_config, "  Konfiguracja  ")
         self.tabs.addTab(self._build_youtube_tab(), "  YouTube  ")
+        self.tab_buffer = self._build_buffer_tab()
+        self.tabs.addTab(self.tab_buffer, "  Buffer  ")
         self.tab_help = self._build_help_tab()
         self.tabs.addTab(self.tab_help, "  Pomoc  ")
         layout.addWidget(self.tabs, 1)
@@ -509,6 +568,194 @@ class MainWindow(QMainWindow):
         page.setStyleSheet("QWidget#scrollPage { background: transparent; }")
         return scroll
 
+    def _build_buffer_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+        description = QLabel("Tworzenie szkiców postów w Buffer (bez publikacji).")
+        description.setObjectName("muted")
+        layout.addWidget(description)
+
+        platforms = QGroupBox("Platformy")
+        platforms_layout = QHBoxLayout(platforms)
+        self.buffer_facebook = QCheckBox("Facebook")
+        self.buffer_instagram = QCheckBox("Instagram")
+        self.buffer_x = QCheckBox("X/Twitter")
+        self.buffer_facebook_type = self._create_buffer_post_type_combo(self.buffer_facebook)
+        self.buffer_instagram_type = self._create_buffer_post_type_combo(self.buffer_instagram)
+        for checkbox, post_type in (
+            (self.buffer_facebook, self.buffer_facebook_type),
+            (self.buffer_instagram, self.buffer_instagram_type),
+        ):
+            column = QVBoxLayout()
+            column.addWidget(checkbox)
+            column.addWidget(post_type)
+            platforms_layout.addLayout(column)
+        platforms_layout.addWidget(self.buffer_x)
+        platforms_layout.addStretch(1)
+        layout.addWidget(platforms)
+
+        self.buffer_facebook_text = self._create_post_description(
+            "Opis na Facebook", "Treść opisu dla Facebooka…", max_chars=None, max_hashtags=None, layout=layout
+        )
+        self.buffer_instagram_text = self._create_post_description(
+            "Opis na Instagram", "Treść opisu dla Instagrama…", max_chars=None, max_hashtags=5, layout=layout
+        )
+        self.buffer_x_text = self._create_post_description(
+            "Opis na X/Twitter", "Treść opisu dla X/Twitter…", max_chars=280, max_hashtags=None, layout=layout
+        )
+
+        layout.addWidget(self._create_editor("buffer_video_list", "Lista filmów Buffer"))
+
+        layout.addWidget(self._build_buffer_schedule())
+
+        bar = QHBoxLayout()
+        self.buffer_status = QLabel("Gotowe do utworzenia szkiców")
+        self.buffer_status.setObjectName("muted")
+        self.buffer_send = QPushButton("⬆  Utwórz szkice w Buffer")
+        self.buffer_send.setObjectName("primary")
+        self.buffer_send.setMinimumHeight(44)
+        self.buffer_send.clicked.connect(self._send_to_buffer)
+        self.buffer_cancel = QPushButton("Przerwij")
+        self.buffer_cancel.setObjectName("danger")
+        self.buffer_cancel.setMinimumHeight(44)
+        self.buffer_cancel.setEnabled(False)
+        self.buffer_cancel.clicked.connect(self._cancel_buffer)
+        bar.addWidget(self.buffer_status, 1)
+        bar.addWidget(self.buffer_send)
+        bar.addWidget(self.buffer_cancel)
+        layout.addLayout(bar)
+
+        self.buffer_log = QPlainTextEdit()
+        self.buffer_log.setReadOnly(True)
+        self.buffer_log.setPlaceholderText("Tutaj pojawią się komunikaty z tworzenia szkiców w Buffer.")
+        self.buffer_log.setMinimumHeight(140)
+        layout.addWidget(self.buffer_log)
+        layout.addStretch(1)
+
+        page.setObjectName("scrollPage")
+        page.setStyleSheet("QWidget#scrollPage { background: transparent; }")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
+
+    def _create_post_description(
+        self, title: str, placeholder: str, max_chars: Optional[int], max_hashtags: Optional[int], layout
+    ) -> QPlainTextEdit:
+        group = QGroupBox(title)
+        group_layout = QVBoxLayout(group)
+        editor = QPlainTextEdit()
+        editor.setPlaceholderText(placeholder)
+        editor.setMinimumHeight(80)
+        counter = QLabel()
+        counter.setObjectName("muted")
+        counter.setWordWrap(True)
+        group_layout.addWidget(editor)
+        group_layout.addWidget(counter)
+
+        def update_counter():
+            text = editor.toPlainText()
+            parts = [f"Znaki: {len(text)}" + (f"/{max_chars}" if max_chars else "")]
+            over_limit = bool(max_chars and len(text) > max_chars)
+            if max_hashtags is not None:
+                hashtags = len(re.findall(r"#\w+", text))
+                parts.append(f"hashtagi: {hashtags}/{max_hashtags}")
+                over_limit = over_limit or hashtags > max_hashtags
+            if over_limit:
+                parts.append("przekroczono limit")
+            counter.setText(" · ".join(parts))
+            counter.setStyleSheet("color: #ff7b7b;" if over_limit else "")
+
+        editor.textChanged.connect(update_counter)
+        update_counter()
+        layout.addWidget(group)
+        return editor
+
+    def _build_day_grid(self, prefix: str):
+        """Siatka dni tygodnia z godzinami; klucze ustawień mają postać `{prefix}_dzien_N` i `{prefix}_godzina_N`."""
+        defaults = {d: "07:30" if d < 5 else "10:00" for d in range(7)}
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+        grid.setContentsMargins(0, 6, 0, 6)
+        days: Dict[int, tuple] = {}
+        for index, name in enumerate(WEEKDAY_NAMES):
+            checkbox = QCheckBox(name)
+            checkbox.setMinimumHeight(30)
+            checkbox.setChecked(str(self.settings.value(f"{prefix}_dzien_{index}", "true")).lower() == "true")
+            time_combo = QComboBox()
+            time_combo.addItems(PUBLISH_TIMES)
+            remembered = str(self.settings.value(f"{prefix}_godzina_{index}", defaults[index]))
+            if remembered not in PUBLISH_TIMES:
+                remembered = defaults[index]
+            time_combo.setCurrentText(remembered)
+            time_combo.setMaxVisibleItems(12)
+            hint = time_combo.sizeHint()
+            time_combo.setMinimumSize(int(hint.width() * 1.2), max(34, int(hint.height() * 1.2)))
+            checkbox.toggled.connect(time_combo.setEnabled)
+            time_combo.setEnabled(checkbox.isChecked())
+            grid.addWidget(checkbox, 0, index)
+            grid.addWidget(time_combo, 1, index)
+            grid.setColumnStretch(index, 1)
+            days[index] = (checkbox, time_combo)
+        return grid, days
+
+    @staticmethod
+    def _connect_day_grid(days: Dict[int, tuple], on_change):
+        for checkbox, time_combo in days.values():
+            checkbox.toggled.connect(on_change)
+            time_combo.currentTextChanged.connect(on_change)
+
+    def _save_day_grid(self, prefix: str, days: Dict[int, tuple]):
+        for index, (checkbox, time_combo) in days.items():
+            self.settings.setValue(f"{prefix}_dzien_{index}", "true" if checkbox.isChecked() else "false")
+            self.settings.setValue(f"{prefix}_godzina_{index}", time_combo.currentText())
+
+    @staticmethod
+    def _set_day_grid_active(days: Dict[int, tuple], active: bool):
+        for checkbox, time_combo in days.values():
+            checkbox.setEnabled(active)
+            time_combo.setEnabled(active and checkbox.isChecked())
+
+    @staticmethod
+    def _selected_hours(days: Dict[int, tuple]) -> Dict[int, dt_time]:
+        return {
+            index: dt_time.fromisoformat(time_combo.currentText())
+            for index, (checkbox, time_combo) in days.items()
+            if checkbox.isChecked()
+        }
+
+    def _build_buffer_schedule(self):
+        group = QGroupBox("PLANOWANIE SZKICÓW")
+        layout = QVBoxLayout(group)
+        self.buffer_custom_schedule = QCheckBox("Własne dni i godziny (inaczej: pn–pt 7:30, sob–nd 10:00)")
+        self.buffer_custom_schedule.setChecked(str(self.settings.value("buffer_wlasny_plan", "false")).lower() == "true")
+        layout.addWidget(self.buffer_custom_schedule)
+        grid, self.buffer_days = self._build_day_grid("buffer")
+        layout.addLayout(grid)
+        self._connect_day_grid(self.buffer_days, self._on_buffer_schedule_changed)
+        self.buffer_custom_schedule.toggled.connect(self._on_buffer_schedule_changed)
+        group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._refresh_buffer_schedule()
+        return group
+
+    def _on_buffer_schedule_changed(self, *_):
+        self.settings.setValue("buffer_wlasny_plan", "true" if self.buffer_custom_schedule.isChecked() else "false")
+        self._save_day_grid("buffer", self.buffer_days)
+        self._refresh_buffer_schedule()
+
+    def _refresh_buffer_schedule(self):
+        self._set_day_grid_active(self.buffer_days, self.buffer_custom_schedule.isChecked())
+
+    def _buffer_hours(self) -> Optional[Dict[int, dt_time]]:
+        if not self.buffer_custom_schedule.isChecked():
+            return None
+        return self._selected_hours(self.buffer_days)
+
     def _on_yt_folder_mode_changed(self, checked: bool = False):
         del checked
         shared = self.yt_same_folder.isChecked()
@@ -538,40 +785,14 @@ class MainWindow(QMainWindow):
         self.yt_custom_schedule.setChecked(str(self.settings.value("yt_wlasny_plan", "false")).lower() == "true")
         layout.addWidget(self.yt_custom_schedule)
 
-        defaults = {d: "07:30" if d < 5 else "10:00" for d in range(7)}
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
-        grid.setContentsMargins(0, 6, 0, 6)
-        self.yt_days: Dict[int, tuple] = {}
-        for index, name in enumerate(WEEKDAY_NAMES):
-            checkbox = QCheckBox(name)
-            checkbox.setMinimumHeight(30)
-            checkbox.setChecked(str(self.settings.value(f"yt_dzien_{index}", "true")).lower() == "true")
-            time_combo = QComboBox()
-            time_combo.addItems(PUBLISH_TIMES)
-            remembered = str(self.settings.value(f"yt_godzina_{index}", defaults[index]))
-            if remembered not in PUBLISH_TIMES:
-                remembered = defaults[index]
-            time_combo.setCurrentText(remembered)
-            time_combo.setMaxVisibleItems(12)
-            hint = time_combo.sizeHint()
-            time_combo.setMinimumSize(int(hint.width() * 1.2), max(34, int(hint.height() * 1.2)))
-            checkbox.toggled.connect(time_combo.setEnabled)
-            time_combo.setEnabled(checkbox.isChecked())
-            grid.addWidget(checkbox, 0, index)
-            grid.addWidget(time_combo, 1, index)
-            grid.setColumnStretch(index, 1)
-            self.yt_days[index] = (checkbox, time_combo)
+        grid, self.yt_days = self._build_day_grid("yt")
         layout.addLayout(grid)
         layout.addWidget(self.yt_mode_publish_now)
         group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         for control in (self.yt_mode_schedule, self.yt_mode_publish_now, self.yt_custom_schedule):
             control.toggled.connect(self._on_publish_settings_changed)
-        for checkbox, time_combo in self.yt_days.values():
-            checkbox.toggled.connect(self._on_publish_settings_changed)
-            time_combo.currentTextChanged.connect(self._on_publish_settings_changed)
+        self._connect_day_grid(self.yt_days, self._on_publish_settings_changed)
         self._refresh_publish_controls()
         return group
 
@@ -579,27 +800,19 @@ class MainWindow(QMainWindow):
         s = self.settings
         s.setValue("yt_od_razu", "true" if self.yt_mode_publish_now.isChecked() else "false")
         s.setValue("yt_wlasny_plan", "true" if self.yt_custom_schedule.isChecked() else "false")
-        for index, (checkbox, time_combo) in self.yt_days.items():
-            s.setValue(f"yt_dzien_{index}", "true" if checkbox.isChecked() else "false")
-            s.setValue(f"yt_godzina_{index}", time_combo.currentText())
+        self._save_day_grid("yt", self.yt_days)
         self._refresh_publish_controls()
 
     def _refresh_publish_controls(self):
         schedule = self.yt_mode_schedule.isChecked()
         self.yt_custom_schedule.setEnabled(schedule)
         active = schedule and self.yt_custom_schedule.isChecked()
-        for checkbox, time_combo in self.yt_days.values():
-            checkbox.setEnabled(active)
-            time_combo.setEnabled(active and checkbox.isChecked())
+        self._set_day_grid_active(self.yt_days, active)
 
     def _publish_times(self) -> Optional[Dict[int, dt_time]]:
         if self.yt_mode_publish_now.isChecked() or not self.yt_custom_schedule.isChecked():
             return None
-        return {
-            index: dt_time.fromisoformat(time_combo.currentText())
-            for index, (checkbox, time_combo) in self.yt_days.items()
-            if checkbox.isChecked()
-        }
+        return self._selected_hours(self.yt_days)
 
     def _choose_yt_folder(self, checked: bool = False):
         del checked
@@ -683,6 +896,120 @@ class MainWindow(QMainWindow):
         self.yt_worker = None
         self.yt_thread = None
         self.yt_start.setEnabled(True)
+
+    def _create_buffer_post_type_combo(self, checkbox: QCheckBox) -> QComboBox:
+        from buffer_upload import DEFAULT_POST_TYPE, POST_TYPES
+
+        combo = QComboBox()
+        combo.addItems(list(POST_TYPES))
+        combo.setCurrentText(DEFAULT_POST_TYPE)
+        combo.setEnabled(checkbox.isChecked())
+        checkbox.toggled.connect(combo.setEnabled)
+        return combo
+
+    def _buffer_platforms(self) -> list:
+        checkboxes = (
+            ("facebook", self.buffer_facebook),
+            ("instagram", self.buffer_instagram),
+            ("x", self.buffer_x),
+        )
+        return [key for key, checkbox in checkboxes if checkbox.isChecked()]
+
+    def _buffer_post_types(self) -> Dict[str, str]:
+        return {
+            "facebook": self.buffer_facebook_type.currentText(),
+            "instagram": self.buffer_instagram_type.currentText(),
+        }
+
+    def _buffer_descriptions(self) -> Dict[str, str]:
+        return {
+            "facebook": self.buffer_facebook_text.toPlainText().strip(),
+            "instagram": self.buffer_instagram_text.toPlainText().strip(),
+            "x": self.buffer_x_text.toPlainText().strip(),
+        }
+
+    def _send_to_buffer(self, checked: bool = False):
+        del checked
+        # Importowane leniwie, bo buffer_upload ładuje moduły YouTube.
+        from buffer_upload import PLATFORM_LABELS, find_text_problems, parse_video_links
+
+        token = saved_buffer_api_key()
+        if not token:
+            QMessageBox.warning(self, "Buffer", "Brak klucza BUFFER_API w pliku settings.json.")
+            return
+        platforms = self._buffer_platforms()
+        if not platforms:
+            QMessageBox.warning(self, "Buffer", "Zaznacz co najmniej jedną platformę.")
+            return
+        links = parse_video_links(self.editors["buffer_video_list"].toPlainText())
+        if not links:
+            QMessageBox.warning(self, "Buffer", "Lista filmów Buffer nie zawiera żadnych linków.")
+            return
+        descriptions = self._buffer_descriptions()
+        empty = [PLATFORM_LABELS[platform] for platform in platforms if not descriptions[platform]]
+        if empty:
+            QMessageBox.warning(self, "Buffer", "Uzupełnij opis na: " + ", ".join(empty) + ".")
+            return
+        problems = find_text_problems(platforms, descriptions)
+        if problems:
+            QMessageBox.warning(self, "Buffer", "\n".join(problems))
+            return
+        if self.buffer_custom_schedule.isChecked() and not self._selected_hours(self.buffer_days):
+            QMessageBox.warning(self, "Buffer", "Zaznacz co najmniej jeden dzień tygodnia.")
+            return
+        if QMessageBox.question(
+            self,
+            "Tworzenie szkiców",
+            f"Utworzyć szkice w Buffer dla {len(links)} filmów?\n\nSzkice nie zostaną opublikowane.",
+        ) != QMessageBox.Yes:
+            return
+
+        self.buffer_log.clear()
+        self.buffer_status.setText("Tworzenie szkiców…")
+        self.buffer_send.setEnabled(False)
+        self.buffer_cancel.setEnabled(True)
+        self.buffer_cancel_event = Event()
+        self.buffer_thread = QThread(self)
+        self.buffer_worker = BufferWorker(
+            token,
+            links,
+            platforms,
+            descriptions,
+            self._buffer_hours(),
+            self._buffer_post_types(),
+            self.buffer_cancel_event,
+        )
+        self.buffer_worker.moveToThread(self.buffer_thread)
+        self.buffer_thread.started.connect(self.buffer_worker.run)
+        self.buffer_worker.log.connect(self.buffer_log.appendPlainText)
+        self.buffer_worker.completed.connect(self._finish_buffer)
+        self.buffer_worker.completed.connect(self.buffer_thread.quit)
+        self.buffer_worker.completed.connect(self.buffer_worker.deleteLater)
+        self.buffer_thread.finished.connect(self.buffer_thread.deleteLater)
+        self.buffer_thread.finished.connect(self._cleanup_buffer)
+        self.buffer_thread.start()
+
+    def _cancel_buffer(self, checked: bool = False):
+        del checked
+        if self.buffer_cancel_event is None or self.buffer_cancel_event.is_set():
+            return
+        self.buffer_cancel_event.set()
+        self.buffer_cancel.setEnabled(False)
+        self.buffer_status.setText("Przerywanie…")
+        self.buffer_log.appendPlainText("Żądanie przerwania wysłane. Zatrzymanie nastąpi po bieżącym szkicu.")
+
+    def _finish_buffer(self, success: bool, message: str):
+        self.buffer_status.setText(message)
+        self.buffer_cancel.setEnabled(False)
+        self.buffer_cancel_event = None
+        self.buffer_log.appendPlainText(message)
+        if not success and "przerwano" not in message.lower():
+            QMessageBox.warning(self, "Buffer", message)
+
+    def _cleanup_buffer(self):
+        self.buffer_worker = None
+        self.buffer_thread = None
+        self.buffer_send.setEnabled(True)
 
     def _build_imagemagick(self):
         group = QGroupBox("ImageMagick (napisy)")
@@ -923,7 +1250,8 @@ class MainWindow(QMainWindow):
     def _load_settings(self):
         defaults = self._default_paths()
         for key, _, _ in self.PATHS:
-            value = fix_path(self.settings.value(key, str(getattr(defaults, key))))
+            default = BUFFER_VIDEO_LIST_PATH if key == "buffer_video_list" else str(getattr(defaults, key))
+            value = fix_path(self.settings.value(key, default))
             self.fields[key].setText("" if key == "plik_logo" and value in ("", ".") else str(value))
 
     def _load_startup_files(self):
@@ -1027,14 +1355,19 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Zapisano plik: {path.name}")
         return True
 
+    def _tab_for_editor(self, key: str):
+        if key == "buffer_video_list":
+            return self.tab_buffer
+        if key in {"plik_z_tekstami", "plik_opisu_zawodow"}:
+            return self.tab_config
+        return self.tab_competition
+
     def _save_dirty_editors(self):
         for key, _ in self.EDITORS:
             if key in self.SUBTITLE_PATH_KEYS and not self.subtitles_check.isChecked():
                 continue
             if key in self._dirty_editors and not self._save_file(key):
-                self.tabs.setCurrentWidget(
-                    self.tab_config if key in {"plik_z_tekstami", "plik_opisu_zawodow"} else self.tab_competition
-                )
+                self.tabs.setCurrentWidget(self._tab_for_editor(key))
                 return False
         return True
 
@@ -1168,6 +1501,14 @@ class MainWindow(QMainWindow):
                 self,
                 "Wysyłanie w toku",
                 "Przerwij wysyłanie na YouTube i poczekaj na jego zakończenie przed zamknięciem aplikacji.",
+            )
+            event.ignore()
+            return
+        if self.buffer_thread and self.buffer_thread.isRunning():
+            QMessageBox.information(
+                self,
+                "Tworzenie szkiców w toku",
+                "Przerwij tworzenie szkiców w Buffer i poczekaj na jego zakończenie przed zamknięciem aplikacji.",
             )
             event.ignore()
             return
