@@ -282,6 +282,79 @@ python ipsc_automato.py --yt --publish
 
 `--publish` bez `/yt` lub `--yt` jest odrzucane. Film pionowy lub kwadratowy (Short) może trwać maksymalnie 3 minuty; filmy poziome nie mają tego limitu. Przy wielu plikach uploader planuje najwyżej jedną publikację dziennie na wybranym kanale. Jeśli OAuth zwróci więcej niż jeden kanał, ustaw zmienną środowiskową `YOUTUBE_CHANNEL_ID` na ID właściwego kanału. Google może wymagać weryfikacji projektu OAuth, zanim filmy przesyłane przez API będą mogły być publiczne.
 
+## 📣 Publikacja na Facebooku, Instagramie i X przez Buffer
+
+Zakładka **Buffer** tworzy w Buffer **szkice** postów z filmami (bez publikacji) — publikację zatwierdzasz już w panelu Buffer. Działa na podstawie listy adresów plików wideo z pliku `buffer.txt`, zwykle linków publicznych z Cloudflare R2.
+
+### Zakładka Buffer w aplikacji
+
+- **Platformy:** checkboxy **Facebook**, **Instagram** i **X/Twitter**. Dla Facebooka i Instagrama wybierasz typ posta: **reel**, **post** lub **story** (domyślnie **reel**). Instagram zawsze jest wysyłany z opcją udostępnienia w feedzie.
+- **Opisy:** osobne pola dla każdej platformy. Aplikacja liczy hashtagi w opisie Instagrama (limit 5) i znaki w opisie X/Twitter (limit 280, każdy adres URL liczy się jako 23 znaki). Przekroczenie limitu blokuje utworzenie szkiców.
+- **Lista filmów (`buffer.txt`):** edytor z przyciskami **Wczytaj z pliku** i **Zapisz do pliku** oraz wyborem pliku. Ścieżka jest zapamiętywana. Z listy brane są wszystkie adresy `http(s)://`, bez duplikatów.
+- **PLANOWANIE SZKICÓW:** te same dni tygodnia i godziny co w sekcji **PUBLIKACJA** zakładki YouTube.
+- **Utwórz szkice w Buffer:** tworzy szkice w pierwszych wolnych terminach. Każdy film dostaje jeden termin, który jest wspólny dla wszystkich wybranych platform. Przycisk **Przerwij** zatrzymuje pracę po bieżącym kroku.
+- **Wyślij do CloudFlare:** wysyła pliki MP4 do bucketa R2 (patrz niżej).
+
+### Integracja z API Buffer
+
+**Gdzie znaleźć klucz API:**
+
+1. Zaloguj się na konto Buffer (jeśli go nie masz, załóż je na https://buffer.com/signup).
+2. Otwórz stronę ustawień API: https://publish.buffer.com/settings/api.
+3. Utwórz nowy klucz API i skopiuj go. Klucz daje dostęp do Twojego konta Buffer, więc nie udostępniaj go i nie wrzucaj do repozytorium Git.
+4. Wklej klucz do pliku `settings.json` w katalogu projektu pod kluczem `BUFFER_API`:
+
+```json
+{
+  "BUFFER_API": "tu_wklej_klucz_api"
+}
+```
+
+Aplikacja korzysta z GraphQL API Buffer (`https://api.buffer.com`) przez moduł `buffer_api.py`, bez dodatkowych bibliotek. Token zapisany pod kluczem `BUFFER_API` w `settings.json` jest wysyłany jako nagłówek autoryzacji. Przebieg tworzenia szkiców:
+
+1. Pobranie pierwszej organizacji konta (`account.organizations`).
+2. Pobranie kanałów i dopasowanie ich po usłudze: `facebook`, `instagram`, `twitter` (X). Jeśli na koncie jest kilka kanałów tej samej usługi, używany jest pierwszy z nich, a w dzienniku pojawia się ostrzeżenie.
+3. Pobranie terminów istniejących postów i szkiców wybranych kanałów, aby nie planować dwóch filmów w tym samym dniu.
+4. Dla każdego filmu wybór najbliższego wolnego terminu i utworzenie szkicu mutacją `createPost` (`saveToDraft: true`, tryb `customScheduled`, wideo jako `assets.video.url`).
+
+Buffer pobiera plik wideo z podanego adresu dopiero w chwili publikacji, dlatego link musi być trwały i publiczny. Treść posta to sam opis, bez linku do filmu.
+
+Postęp zapisuje się w pliku **`buffer_upload_state.json`** (kluczem jest para `platforma|link` z identyfikatorem posta i terminem). Dzięki temu ponowne uruchomienie pomija już wysłane pary, a film dla kolejnej platformy dostaje ten sam termin co wcześniej. Usunięcie tego pliku spowoduje utworzenie szkiców od nowa, więc rób to tylko świadomie.
+
+Błędy API (np. odrzucony token, brak kanału danej usługi, brak połączenia) są pokazywane w dzienniku jako `[Buffer] BŁĄD: …`.
+
+### Integracja z Cloudflare R2
+
+Cloudflare R2 pełni rolę publicznego hostingu plików wideo, z którego Buffer je pobiera. Moduł `cloudflare_upload.py` korzysta z interfejsu S3 (biblioteka `boto3`). Wymagane klucze w `settings.json` opisuje sekcja „Konfiguracja Skryptu” (`CLOUDFLARE_API`, `CLOUDFLARE_ACCESS_KEY_ID`, `CLOUDFLARE_SECRET_ACCESS_KEY`, `CLOUDFLARE_PUBLIC_URL`). Przed wysyłką aplikacja sprawdza, czy `CLOUDFLARE_PUBLIC_URL` nie wskazuje na endpoint S3.
+
+**Gdzie znaleźć dane do konfiguracji R2:**
+
+1. **Bucket:** w panelu Cloudflare otwórz **R2 object storage → Overview** i wybierz **Create bucket**. Nazwa bucketa (np. `buffer-api`) musi być taka sama jak na końcu `CLOUDFLARE_API`.
+2. **Account ID:** widoczny na stronie **R2 object storage → Overview** w sekcji **Account Details**. Wstaw go w adresie endpointu w miejscu `<ID_KONTA>`.
+3. **Klucze API (`CLOUDFLARE_ACCESS_KEY_ID` i `CLOUDFLARE_SECRET_ACCESS_KEY`):** na stronie **R2 object storage → Overview**, w sekcji **Account Details**, wybierz **Manage** przy **API Tokens**, a następnie **Create Account API token** (lub **Create User API token**). W uprawnieniach wybierz **Object Read & Write** i (opcjonalnie) ogranicz token do bucketa `buffer-api`. Po utworzeniu zobaczysz **Access Key ID** i **Secret Access Key** — skopiuj oba od razu, bo sekretu nie da się odczytać ponownie.
+4. **Endpoint (`CLOUDFLARE_API`):** `https://<ID_KONTA>.r2.cloudflarestorage.com/<nazwa_bucketa>`. Jeśli bucket założono w jurysdykcji UE, endpoint ma postać `https://<ID_KONTA>.eu.r2.cloudflarestorage.com/<nazwa_bucketa>`.
+5. **Publiczny adres (`CLOUDFLARE_PUBLIC_URL`):** otwórz bucket, przejdź do **Settings → Public access** i włącz dostęp. Cloudflare pokaże adres `https://pub-….r2.dev` (albo możesz podpiąć własną domenę). To ten adres wpisz w `CLOUDFLARE_PUBLIC_URL`.
+
+Przykład uzupełnionych kluczy w `settings.json`:
+
+```json
+{
+  "CLOUDFLARE_API": "https://<ID_KONTA>.r2.cloudflarestorage.com/buffer-api",
+  "CLOUDFLARE_ACCESS_KEY_ID": "twoj_access_key_id",
+  "CLOUDFLARE_SECRET_ACCESS_KEY": "twoj_secret_access_key",
+  "CLOUDFLARE_PUBLIC_URL": "https://pub-xxxx.r2.dev"
+}
+```
+
+Przycisk **Wyślij do CloudFlare** działa tak:
+
+1. Zbiera wszystkie pliki `.mp4` z wybranego folderu (domyślnie **Gotowe**), posortowane po nazwie.
+2. Dla każdego pliku sprawdza, czy obiekt o tej samej nazwie już istnieje w buckecie. Jeśli tak, nie wysyła go ponownie.
+3. Wysyła brakujące pliki z typem `video/mp4`.
+4. Buduje publiczny link (`CLOUDFLARE_PUBLIC_URL` + nazwa pliku, z zakodowanymi znakami specjalnymi) i dopisuje go na końcu `buffer.txt`, jeśli go tam jeszcze nie ma. Dotyczy to także plików, które były już w buckecie.
+
+Link jest dopisywany po każdym pliku, więc przerwana wysyłka nie gubi już wysłanych filmów. Błąd jednego pliku (np. chwilowy problem sieci) jest zapisywany w dzienniku jako `[Cloudflare] BŁĄD przy …`, a wysyłka przechodzi do kolejnych plików.
+
 ## ⚠️ Najczęstsze problemy
 
 - **`ModuleNotFoundError: No module named 'google'`:** Brakuje bibliotek Google. Uruchom `python -m pip install -r requirements.txt` tym samym Pythonem, którym odpalasz skrypt.
@@ -299,3 +372,12 @@ python ipsc_automato.py --yt --publish
 - **Błąd `must be real number, not NoneType` przy zapisie wideo:** Masz zbyt nową bibliotekę `decorator`. Użyj `pip install "decorator==4.4.2"`.
 - **Błąd `Accessing time t=... with clip duration=...` dla muzyki:** Skrypt zapętla muzykę, więc krótki utwór nie powinien go wywołać; sprawdź, czy plik `.mp3` nie jest uszkodzony.
 - **Pliki `*TEMP_MPY_*`:** Resztki nieudanych renderów. Skrypt je pomija, możesz je bezpiecznie usunąć.
+- **Buffer: „Buffer odrzucił zapytanie (HTTP 401/403)”:** Nieprawidłowy lub wygasły token. Wpisz aktualny klucz w `settings.json` pod `BUFFER_API`.
+- **Buffer: „W Buffer nie znaleziono kanału …”:** Na koncie Buffer nie ma kanału wybranej platformy. Podłącz go w panelu Buffer albo odznacz tę platformę.
+- **Buffer: „Pominięto już wysłany film”:** Ta para platforma + film jest już w `buffer_upload_state.json`. Aby utworzyć szkic ponownie, usuń odpowiedni wpis z pliku (świadomie — może to dać duplikat w Buffer).
+- **Buffer: „Opis na Instagram ma … hashtagów” / „Opis na X/Twitter ma … znaków”:** Skróć opis do limitu, zanim utworzysz szkice.
+- **Cloudflare: „Uzupełnij w settings.json: …”:** Brakuje jednego z kluczy `CLOUDFLARE_*`. Uzupełnij wszystkie cztery.
+- **Cloudflare: „CLOUDFLARE_PUBLIC_URL wskazuje na endpoint S3”:** W `CLOUDFLARE_PUBLIC_URL` wpisałeś adres `*.r2.cloudflarestorage.com`. Włącz **Public access** dla bucketa i wpisz adres `https://pub-….r2.dev` lub własnej domeny.
+- **Cloudflare: „Nieprawidłowy adres CLOUDFLARE_API”:** Adres musi kończyć się nazwą bucketa, np. `https://<ID_KONTA>.r2.cloudflarestorage.com/buffer-api`.
+- **Cloudflare: „W folderze nie ma plików MP4”:** Wybrany folder nie zawiera plików `.mp4`. Wskaż właściwy folder przyciskiem **Przeglądaj…**.
+- **Buffer: film nie pojawia się w Buffer po publikacji:** Sprawdź, czy link z `buffer.txt` otwiera się w przeglądarce bez logowania. Jeśli nie, włącz Public access dla bucketa w Cloudflare R2.
