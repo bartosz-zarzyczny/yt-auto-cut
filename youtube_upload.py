@@ -75,6 +75,7 @@ def nearest_free_slot(
 
 def _authorize(client_secrets: Path, token_file: Path) -> Any:
     try:
+        from google.auth.exceptions import RefreshError
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -95,7 +96,11 @@ def _authorize(client_secrets: Path, token_file: Path) -> Any:
     if token_file.is_file():
         credentials = Credentials.from_authorized_user_file(str(token_file), SCOPES)
     if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+        except RefreshError:
+            # Token unieważniony (np. wygasła zgoda) — wymagane ponowne logowanie w przeglądarce.
+            credentials = None
     if not credentials or not credentials.valid or not credentials.has_scopes(SCOPES):
         flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets), SCOPES)
         credentials = flow.run_local_server(port=0)

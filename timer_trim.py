@@ -1,5 +1,7 @@
 from typing import Callable, Optional
 
+from system_settings import RED, RESET
+
 BEFORE_START = 0.5   # o tyle cofamy się względem wykrytego sygnału
 AFTER_END = 0.8      # zapas po czasie przebiegu
 
@@ -25,8 +27,8 @@ def trim_video(
     log_callback: Optional[Callable[[str], None]] = None,
 ):
     """Przycina klip do przebiegu i wypisuje informację na konsoli."""
-    def report(text):
-        print(text)
+    def report(text, kolor=None):
+        print(f"{kolor}{text}{RESET}" if kolor else text)
         if log_callback:
             log_callback(text)
 
@@ -36,7 +38,7 @@ def trim_video(
 
     result = determine_trim(signals, run_time, video.duration)
     if result is None:
-        report("[PRZYCIĘCIE] Pominięto - brak jednoznacznego wykrycia timera, zostaje pełny film.")
+        report("[PRZYCIĘCIE] Pominięto - brak jednoznacznego wykrycia timera, zostaje pełny film.", RED)
         return video
 
     start, end = result

@@ -4,6 +4,7 @@ from typing import Callable, Optional
 
 import numpy as np
 from scipy.signal import stft
+from system_settings import RED, RESET
 from video_cancellation import GenerationCancelled
 
 SR = 44100
@@ -103,8 +104,8 @@ def zglos_wykrycie_timera(
     cancel_event: Optional[Event] = None,
 ):
     """Wypisuje wynik wykrywania na konsoli (bez przycinania). Zwraca listę wykryć."""
-    def raportuj(tekst):
-        print(tekst)
+    def raportuj(tekst, kolor=None):
+        print(f"{kolor}{tekst}{RESET}" if kolor else tekst)
         if log_callback:
             log_callback(tekst)
 
@@ -117,7 +118,7 @@ def zglos_wykrycie_timera(
         return []
 
     if not sygnaly:
-        raportuj("[TIMER] Nie wykryto sygnału timera.")
+        raportuj("[TIMER] Nie wykryto sygnału timera.", RED)
     else:
         t, f = sygnaly[0]
         raportuj(f"[TIMER] Wykryto start timera: {t:.2f}s (~{f:.0f} Hz)")
