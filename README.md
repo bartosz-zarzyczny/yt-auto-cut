@@ -184,6 +184,7 @@ Plik zawiera **skopiowaną stronę z wynikami zawodnika z PractiScore** (wyniki 
 - Numer toru z `mapowanie_torow.txt` musi mieć odpowiadający wiersz `Stage N` w wynikach. Jeśli go brakuje, nagranie jest **pomijane** z komunikatem „brak wyników dla toru N”, a w aplikacji desktopowej ma status „pominięto”.
 - Jeśli pominięto wszystkie nagrania, aplikacja informuje, że wyniki nie zawierają przypisanych torów — sprawdź wtedy `mapowanie_torow.txt` i `wyniki.txt` w zakładce **Zawody**.
 - Plik wczytywany jest w UTF-8; w aplikacji desktopowej możesz go wkleić i zapisać bezpośrednio w zakładce **Zawody**.
+- **Format wyników (zakładka Zawody):** nad wyborem pliku wybierz jedną z opcji — **Practiscore** (domyślnie, wyniki wklejone ze strony PractiScore), **ECM** (wiersze `Stage 01  4.3290  40  8 0 0 0 0 0  9.24`, czas z ostatniej kolumny) lub **Trening** (ręcznie wpisane wiersze `numer toru; czas`, np. `1; 23` lub `3;20,81`). Wybór jest zapamiętywany.
 
 3. **Dodatkowe teksty u góry wideo (`teksty_wideo.txt`):**
    Checkbox **Czy dodać napisy** steruje wyłącznie planszą z wynikami na dole filmu. Teksty z `teksty_wideo.txt` są dodawane niezależnie od checkboxa, jeśli plik zawiera wpisy w nawiasach kwadratowych; pusty plik (lub plik bez takich wpisów) nie dodaje tekstów. Czas przebiegu z `wyniki.txt` nadal służy do przycięcia filmu, jeśli jest dostępny.

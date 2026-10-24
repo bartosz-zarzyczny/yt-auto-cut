@@ -67,6 +67,9 @@ try:
         PLIK_Z_TEKSTAMI,
         PLIK_Z_TORAMI,
         PLIK_Z_WYNIKAMI,
+        TRYB_WYNIKOW_ECM,
+        TRYB_WYNIKOW_PRACTISCORE,
+        TRYB_WYNIKOW_TRENING,
         KonfiguracjaSciezek,
         uruchom_automatyzacje,
     )
@@ -81,6 +84,9 @@ except Exception as import_error:
     PLIK_Z_TEKSTAMI = str(PROJECT_DIR / "teksty_wideo.txt")
     PLIK_Z_TORAMI = str(PROJECT_DIR / "mapowanie_torow.txt")
     PLIK_OPISU_ZAWODOW = str(PROJECT_DIR / "opis_zawodow.txt")
+    TRYB_WYNIKOW_PRACTISCORE = "practiscore"
+    TRYB_WYNIKOW_ECM = "ecm"
+    TRYB_WYNIKOW_TRENING = "trening"
     uruchom_automatyzacje = None
 
     @dataclass(frozen=True)
@@ -95,9 +101,15 @@ except Exception as import_error:
         domyslna_orientacja: str = "V"
         dodaj_napisy: bool = True
         plik_logo: str = ""
+        tryb_wynikow: str = TRYB_WYNIKOW_PRACTISCORE
 
 
 BUFFER_VIDEO_LIST_PATH = str(PROJECT_DIR / "buffer.txt")
+RESULTS_MODES = (
+    (TRYB_WYNIKOW_PRACTISCORE, "Practiscore"),
+    (TRYB_WYNIKOW_ECM, "ECM"),
+    (TRYB_WYNIKOW_TRENING, "Trening"),
+)
 
 
 class AssemblyWorker(QObject):
@@ -1309,9 +1321,38 @@ class MainWindow(QMainWindow):
         track_mapping = self._create_editor("plik_z_torami", "Mapowanie torów")
         track_mapping.layout().insertLayout(1, self._build_orientation_choice())
         layout.addWidget(track_mapping)
-        layout.addWidget(self._create_editor("plik_z_wynikami", "Wyniki zawodów"))
+        results = self._create_editor("plik_z_wynikami", "Wyniki zawodów")
+        results.layout().insertLayout(0, self._build_results_mode_choice())
+        layout.addWidget(results)
         layout.addStretch(1)
         return page
+
+    def _build_results_mode_choice(self):
+        row = QHBoxLayout()
+        label = QLabel("Format wyników:")
+        self.results_mode_group = QButtonGroup(self)
+        self.results_mode_buttons: Dict[str, QRadioButton] = {}
+        for mode, title in RESULTS_MODES:
+            button = QRadioButton(title)
+            self.results_mode_group.addButton(button)
+            self.results_mode_buttons[mode] = button
+            row.addWidget(button)
+        remembered = str(self.settings.value("tryb_wynikow", TRYB_WYNIKOW_PRACTISCORE)).lower()
+        self.results_mode_buttons.get(remembered, self.results_mode_buttons[TRYB_WYNIKOW_PRACTISCORE]).setChecked(True)
+        self.results_mode_group.buttonToggled.connect(self._remember_results_mode)
+
+        row.insertWidget(0, label)
+        row.addStretch(1)
+        return row
+
+    def _remember_results_mode(self, *_args):
+        self.settings.setValue("tryb_wynikow", self._selected_results_mode())
+
+    def _selected_results_mode(self) -> str:
+        for mode, button in self.results_mode_buttons.items():
+            if button.isChecked():
+                return mode
+        return TRYB_WYNIKOW_PRACTISCORE
 
     def _build_orientation_choice(self):
         row = QHBoxLayout()
@@ -1540,6 +1581,7 @@ class MainWindow(QMainWindow):
             **paths,
             domyslna_orientacja=self._default_orientation(),
             dodaj_napisy=self.subtitles_check.isChecked(),
+            tryb_wynikow=self._selected_results_mode(),
         )
 
     def _start(self):
