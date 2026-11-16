@@ -6,8 +6,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
+from app_settings import saved_buffer_api_key
 from buffer_api import BufferApiError, create_draft, get_channels, get_due_dates, get_organization_id
-from youtube_upload import TIME_ZONE, nearest_free_slot
+from generate_names import generate_description_and_hashtags
+from youtube_upload import TIME_ZONE, nearest_free_slot, parse_schedule
 
 PROJECT_DIR = Path(__file__).resolve().parent
 STATE_FILE = PROJECT_DIR / "buffer_upload_state.json"
@@ -41,6 +43,7 @@ X_URL_LENGTH = 23
 
 URL_PATTERN = re.compile(r"https?://\S+")
 HASHTAG_PATTERN = re.compile(r"#\w+")
+PLATFORM_ALIASES = {"facebook": PLATFORM_FACEBOOK, "instagram": PLATFORM_INSTAGRAM, "x": PLATFORM_X, "twitter": PLATFORM_X}
 
 
 def parse_video_links(text: str) -> List[str]:
@@ -201,3 +204,66 @@ def send_drafts(
             log(f"[Buffer] Szkic utworzony: {PLATFORM_LABELS[platform]} ({post_id})")
     log(f"[Buffer] Utworzono szkiców: {created}, pominięto: {skipped}.")
     return created, skipped
+
+
+def parse_platforms(text: str) -> List[str]:
+    """Zamienia tekst w rodzaju 'facebook,instagram' na listę identyfikatorów platform."""
+    platforms: List[str] = []
+    for name in text.split(","):
+        name = name.strip().casefold()
+        if not name:
+            continue
+        platform = PLATFORM_ALIASES.get(name)
+        if platform is None:
+            raise ValueError(
+                f"Nieznana platforma: '{name}'. Dostępne: facebook, instagram, x."
+            )
+        if platform not in platforms:
+            platforms.append(platform)
+    if not platforms:
+        raise ValueError("Nie wybrano żadnej platformy. Podaj np. facebook,instagram,x.")
+    return platforms
+
+
+def build_platform_descriptions(description_file: Path, platforms: Sequence[str]) -> Dict[str, str]:
+    """Buduje opis dla każdej platformy z pliku opisu zawodów; Instagram dostaje najwyżej 5 hashtagów."""
+    text, hashtags = generate_description_and_hashtags(description_file)
+    body = text.rsplit("\n", 1)[0].rstrip()
+    descriptions = {platform: text for platform in platforms}
+    if PLATFORM_INSTAGRAM in platforms:
+        descriptions[PLATFORM_INSTAGRAM] = f"{body}\n\n{' '.join(hashtags[:INSTAGRAM_MAX_HASHTAGS])}"
+    return descriptions
+
+
+def create_buffer_drafts(
+    list_path: Path,
+    platforms: Sequence[str],
+    post_type: str,
+    schedule_text: Optional[str],
+    description_file: Path,
+    log: Callable[[str], None],
+) -> int:
+    """Tworzy szkice Buffer dla filmów z listy; zwraca liczbę błędów (0 = sukces)."""
+    try:
+        token = saved_buffer_api_key()
+        if not token:
+            raise BufferApiError("Uzupełnij BUFFER_API w settings.json.")
+        hours = parse_schedule(schedule_text) if schedule_text else None
+        links = parse_video_links(list_path.read_text(encoding="utf-8")) if list_path.is_file() else []
+        descriptions = build_platform_descriptions(description_file, platforms)
+        problems = find_text_problems(platforms, descriptions)
+        if problems:
+            raise BufferApiError(" ".join(problems))
+        send_drafts(
+            token,
+            links,
+            platforms,
+            descriptions,
+            hours,
+            log,
+            post_types={platform: post_type for platform in platforms},
+        )
+    except (BufferApiError, OSError, ValueError) as error:
+        log(f"[Buffer] BŁĄD: {error}")
+        return 1
+    return 0

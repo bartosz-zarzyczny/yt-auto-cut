@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 import random
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +60,7 @@ PLIK_Z_WYNIKAMI = os.path.join(PROJECT_DIR, "wyniki.txt")
 PLIK_Z_TEKSTAMI = os.path.join(PROJECT_DIR, "teksty_wideo.txt")
 PLIK_Z_TORAMI = os.path.join(PROJECT_DIR, "mapowanie_torow.txt")
 PLIK_OPISU_ZAWODOW = os.path.join(PROJECT_DIR, "opis_zawodow.txt")
+BUFFER_LIST_FILE = Path(PROJECT_DIR) / "buffer.txt"
 move_old_files(PROJECT_DIR)
 
 
@@ -80,6 +82,18 @@ class KonfiguracjaSciezek:
     dodaj_napisy: bool = True
     plik_logo: str = ""
     tryb_wynikow: str = TRYB_WYNIKOW_PRACTISCORE
+
+
+@dataclass(frozen=True)
+class PublishOptions:
+    youtube_schedule: Optional[str] = None
+    publish_now: bool = False
+    unlisted: bool = False
+    cloudflare: bool = False
+    buffer: bool = False
+    buffer_platforms: tuple = ()
+    buffer_post_type: str = "reel"
+    buffer_schedule: Optional[str] = None
 
 # ===================================================================
 # FUNKCJE POMOCNICZE
@@ -176,8 +190,10 @@ def uruchom_automatyzacje(
     log_callback: Optional[Callable[[str], None]] = None,
     progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
     cancel_event: Optional[Event] = None,
+    publish_options: Optional[PublishOptions] = None,
 ):
     konfiguracja = konfiguracja or KonfiguracjaSciezek()
+    options = publish_options or PublishOptions()
 
     def raportuj(tekst):
         print(tekst)
@@ -349,12 +365,35 @@ def uruchom_automatyzacje(
                 except FileNotFoundError:
                     pass
 
+    if options.cloudflare and not przerwano:
+        from cloudflare_upload import upload_to_configured_bucket
+
+        liczba_bledow += upload_to_configured_bucket(konfiguracja.folder_wyjsciowy, BUFFER_LIST_FILE, raportuj)
+
+    if options.buffer and not przerwano:
+        from buffer_upload import create_buffer_drafts
+
+        liczba_bledow += create_buffer_drafts(
+            BUFFER_LIST_FILE,
+            list(options.buffer_platforms),
+            options.buffer_post_type,
+            options.buffer_schedule,
+            konfiguracja.plik_opisu_zawodow,
+            raportuj,
+        )
+
     if yt and not przerwano:
         from youtube_upload import main as uruchom_youtube
 
         argumenty_youtube = [str(konfiguracja.folder_wyjsciowy)]
         if publikuj:
             argumenty_youtube.append("--publish")
+        if options.youtube_schedule:
+            argumenty_youtube += ["--schedule", options.youtube_schedule]
+        if options.publish_now:
+            argumenty_youtube.append("--publish-now")
+        if options.unlisted:
+            argumenty_youtube.append("--unlisted")
         uruchom_youtube(argumenty_youtube)
     return bool(przypisane_tory) and liczba_bledow == 0 and not przerwano
 
@@ -376,10 +415,95 @@ def main():
         action="store_true",
         help="Wysyła filmy do YouTube; wymaga jednocześnie opcji --yt lub /yt.",
     )
+    schedule_group = parser.add_mutually_exclusive_group()
+    schedule_group.add_argument(
+        "--schedule",
+        metavar="HARMONOGRAM",
+        help="Harmonogram publikacji YouTube, np. 'pon=07:30,sob=10:00' (wymaga --yt i --publish).",
+    )
+    schedule_group.add_argument(
+        "--publish-now",
+        dest="publish_now",
+        action="store_true",
+        help="Publikuje filmy na YouTube od razu, bez harmonogramu (wymaga --yt i --publish).",
+    )
+    parser.add_argument(
+        "--unlisted",
+        action="store_true",
+        help="Dodatkowo wysyła na YouTube wersję unlisted z linkiem youtu.be (wymaga --yt i --publish).",
+    )
+    parser.add_argument(
+        "--cloudflare",
+        action="store_true",
+        help="Po montażu wysyła MP4 z folderu Gotowe na Cloudflare R2 i dopisuje linki do buffer.txt.",
+    )
+    parser.add_argument(
+        "--buffer",
+        action="store_true",
+        help="Po montażu tworzy szkice w Buffer z linków z buffer.txt (wymaga --buffer-platforms).",
+    )
+    parser.add_argument(
+        "--buffer-platforms",
+        metavar="PLATFORMY",
+        help="Platformy Buffer oddzielone przecinkami: facebook,instagram,x (wymaga --buffer).",
+    )
+    parser.add_argument(
+        "--buffer-post-type",
+        metavar="TYP",
+        default="reel",
+        choices=["reel", "post", "story"],
+        help="Typ posta dla Facebook/Instagram w Buffer (domyślnie: reel).",
+    )
+    parser.add_argument(
+        "--buffer-schedule",
+        metavar="HARMONOGRAM",
+        help="Harmonogram szkiców Buffer w formacie 'pon=07:30,sob=10:00' (wymaga --buffer).",
+    )
     args = parser.parse_args()
+
+    from youtube_upload import parse_schedule
+    from buffer_upload import parse_platforms
+
+    publish_flags_used = args.publish or args.schedule or args.publish_now or args.unlisted
+    if publish_flags_used and not args.yt:
+        parser.error("--publish, --schedule, --publish-now i --unlisted wymagają opcji --yt lub /yt.")
     if args.publish and not args.yt:
         parser.error("--publish wymaga również opcji --yt lub /yt.")
-    uruchom_automatyzacje(yt=args.yt, publikuj=args.publish)
+    if args.buffer_platforms and not args.buffer:
+        parser.error("--buffer-platforms wymaga opcji --buffer.")
+    if args.buffer_schedule and not args.buffer:
+        parser.error("--buffer-schedule wymaga opcji --buffer.")
+    if args.buffer and not args.buffer_platforms:
+        parser.error("--buffer wymaga opcji --buffer-platforms, np. --buffer-platforms facebook,instagram.")
+    if args.schedule:
+        try:
+            parse_schedule(args.schedule)
+        except ValueError as error:
+            parser.error(f"--schedule: {error}")
+    if args.buffer_schedule:
+        try:
+            parse_schedule(args.buffer_schedule)
+        except ValueError as error:
+            parser.error(f"--buffer-schedule: {error}")
+    buffer_platforms: tuple = ()
+    if args.buffer_platforms:
+        try:
+            buffer_platforms = tuple(parse_platforms(args.buffer_platforms))
+        except ValueError as error:
+            parser.error(f"--buffer-platforms: {error}")
+
+    options = PublishOptions(
+        youtube_schedule=args.schedule,
+        publish_now=args.publish_now,
+        unlisted=args.unlisted,
+        cloudflare=args.cloudflare,
+        buffer=args.buffer,
+        buffer_platforms=buffer_platforms,
+        buffer_post_type=args.buffer_post_type,
+        buffer_schedule=args.buffer_schedule,
+    )
+    ok = uruchom_automatyzacje(yt=args.yt, publikuj=args.publish, publish_options=options)
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

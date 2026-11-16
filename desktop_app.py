@@ -13,7 +13,8 @@ from datetime import time as dt_time
 from functools import partial
 from threading import Event
 from typing import Dict, Optional
-from PySide6.QtCore import QObject, QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QSettings, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -501,6 +502,27 @@ class MainWindow(QMainWindow):
         self.log_view.setPlaceholderText("Tutaj pojawią się postęp montażu i komunikaty aplikacji.")
         log_layout.addWidget(self.log_view)
         layout.addWidget(log_group, 1)
+
+        social_links = QHBoxLayout()
+        social_links.setSpacing(8)
+        social_label = QLabel("Znajdź mnie:")
+        social_label.setObjectName("muted")
+        social_links.addWidget(social_label)
+        for icon, name, url in (
+            ("🐙", "GitHub", "https://github.com/bartosz-zarzyczny"),
+            ("▶", "YouTube", "https://www.youtube.com/@Mr_BartekZ"),
+            ("◎", "Instagram", "https://www.instagram.com/mr_bartekz/"),
+            ("f", "Facebook", "https://www.facebook.com/profile.php?id=61587533125970"),
+            ("𝕏", "X", "https://x.com/Mr_BartekZ"),
+        ):
+            button = QPushButton(f"{icon}  {name}")
+            button.setToolTip(f"Otwórz profil {name}")
+            button.clicked.connect(
+                lambda _checked=False, target_url=url: QDesktopServices.openUrl(QUrl(target_url))
+            )
+            social_links.addWidget(button)
+        social_links.addStretch(1)
+        layout.addLayout(social_links)
         return page
 
     def _build_config_tab(self):

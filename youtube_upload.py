@@ -73,6 +73,32 @@ def nearest_free_slot(
         day += timedelta(days=1)
 
 
+WEEKDAY_ALIASES = {"pon": 0, "wt": 1, "sr": 2, "czw": 3, "pt": 4, "sob": 5, "nd": 6}
+
+
+def parse_schedule(text: str) -> Dict[int, time]:
+    """Zamienia tekst w rodzaju 'pon=07:30,sob=10:00' na mapę dzień tygodnia (0=pon) → godzina."""
+    hours: Dict[int, time] = {}
+    for entry in text.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        day_name, separator, hour_text = entry.partition("=")
+        weekday = WEEKDAY_ALIASES.get(day_name.strip().casefold())
+        if not separator or weekday is None:
+            raise ValueError(
+                f"Nieprawidłowy wpis harmonogramu: '{entry}'. Oczekiwano np. pon=07:30 "
+                f"(dni: {', '.join(WEEKDAY_ALIASES)})."
+            )
+        try:
+            hours[weekday] = time.fromisoformat(hour_text.strip())
+        except ValueError as error:
+            raise ValueError(f"Nieprawidłowa godzina w harmonogramie: '{entry}'. Oczekiwano formatu GG:MM.") from error
+    if not hours:
+        raise ValueError("Harmonogram jest pusty. Podaj np. pon=07:30,sob=10:00.")
+    return hours
+
+
 def _authorize(client_secrets: Path, token_file: Path) -> Any:
     try:
         from google.auth.exceptions import RefreshError
@@ -401,6 +427,22 @@ def main(argv: Optional[List[str]] = None) -> None:
         action="store_true",
         help="Wykonuje rzeczywisty upload; bez tej flagi tylko pokazuje podgląd.",
     )
+    schedule_group = parser.add_mutually_exclusive_group()
+    schedule_group.add_argument(
+        "--schedule",
+        help="Harmonogram publikacji, np. pon=07:30,sob=10:00 (dni: pon, wt, sr, czw, pt, sob, nd).",
+    )
+    schedule_group.add_argument(
+        "--publish-now",
+        dest="publish_now",
+        action="store_true",
+        help="Publikuje filmy od razu, bez harmonogramu.",
+    )
+    parser.add_argument(
+        "--unlisted",
+        action="store_true",
+        help="Dodatkowo wysyła wersję niepubliczną (dostępną tylko z linkiem) i wypisuje jej adres.",
+    )
     parser.add_argument(
         "--opis", dest="description_file", type=Path, default=DESCRIPTION_FILE,
         help="Plik z opisem zawodów.",
@@ -423,7 +465,22 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not videos:
         parser.error(f"Nie znaleziono plików MP4 w {args.wejscie}")
 
-    upload_videos(videos, args.publish, args.description_file, args.client_secrets)
+    hours = None
+    if args.schedule:
+        try:
+            hours = parse_schedule(args.schedule)
+        except ValueError as error:
+            parser.error(str(error))
+
+    upload_videos(
+        videos,
+        args.publish,
+        args.description_file,
+        args.client_secrets,
+        hours=hours,
+        immediate=args.publish_now,
+        also_unlisted=args.unlisted,
+    )
 
 
 if __name__ == "__main__":

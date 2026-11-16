@@ -64,7 +64,7 @@ Interfejs w ciemnym motywie jest podzielony na sześć zakładek (w tej kolejno�
 
 | Zakładka         | Zawartość                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Główna**       | Checkbox **Czy dodać napisy** (domyślnie odznaczony; dotyczy wyłącznie planszy z wynikami na dole filmu), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy                                                                                                                                     |
+| **Główna**       | Checkbox **Czy dodać napisy** (domyślnie odznaczony; dotyczy wyłącznie planszy z wynikami na dole filmu), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy oraz skróty z ikonami do profili autora na dole zakładki |
 | **Zawody**       | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`)                                                                                                                                                                                                                                                             |
 | **Konfiguracja** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 100×100 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), ścieżka do programu **ImageMagick** (zapis w `settings.json`) oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
 | **YouTube**      | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania                                                                                                                                                                                 |
@@ -244,7 +244,7 @@ Nie używaj konta usługi — upload odbywa się w imieniu zalogowanego kanału.
 5. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku; film przerwany w trakcie nie zostaje zapisany w rejestrze, więc kolejna próba wyśle go od nowa. Już wysłane filmy są pomijane (rejestr `youtube_upload_state.json`). Okna logowania Google w przeglądarce nie da się przerwać z aplikacji — zamknij je ręcznie.
 6. Aplikacja nie zamknie się w trakcie wysyłania; najpierw ją przerwij.
 
-Opcje sekcji **PUBLIKACJA** dotyczą tylko aplikacji desktopowej; uploader uruchamiany z konsoli zawsze używa harmonogramu domyślnego.
+Opcje sekcji **PUBLIKACJA** w aplikacji desktopowej mają odpowiedniki w terminalu (`--schedule`, `--publish-now`, `--unlisted`, opisane w sekcji „Opcje publikacji w terminalu”). Bez tych flag obowiązuje harmonogram domyślny.
 
 Przy braku `youtube_client_secret.json` lub bibliotek Google aplikacja pokaże komunikat błędu w dzienniku — patrz instrukcja uzyskania klucza powyżej oraz zakładka **Pomoc → Test Systemu**.
 
@@ -256,7 +256,7 @@ Uzupełnij `opis_zawodow.txt` nazwą i datą zawodów. Generator `generate_names
 python generate_names.py Gotowe_Stage_1.mp4
 ```
 
-Uploader `youtube_upload.py` jest uruchamiany z głównego skryptu wyłącznie po podaniu opcji `/yt` lub `--yt` (lub przyciskiem **Wyślij do YT** w aplikacji desktopowej). Odczytuje playlistę przesłanych filmów kanału, sprawdza zaplanowane publikacje i wybiera najbliższy wolny dzień: domyślnie poniedziałek–piątek o 7:30, sobota–niedziela o 10:00 czasu `Europe/Warsaw` (w aplikacji desktopowej można to zmienić w sekcji **PUBLIKACJA** albo publikować od razu). Uwzględnia terminy filmów zaplanowanych oraz dni publikacji filmów publicznych i niepublicznych. Opis YouTube zawiera tylko nazwę, datę, lokalizację, typ i poziom zawodów oraz hashtagi tworzone z tych pól — nie kopiuje całego pliku z opisem zawodów.
+Uploader `youtube_upload.py` jest uruchamiany z głównego skryptu wyłącznie po podaniu opcji `/yt` lub `--yt` (lub przyciskiem **Wyślij do YT** w aplikacji desktopowej). Odczytuje playlistę przesłanych filmów kanału, sprawdza zaplanowane publikacje i wybiera najbliższy wolny dzień: domyślnie poniedziałek–piątek o 7:30, sobota–niedziela o 10:00 czasu `Europe/Warsaw` (można to zmienić w sekcji **PUBLIKACJA** aplikacji desktopowej albo flagami `--schedule` / `--publish-now`). Uwzględnia terminy filmów zaplanowanych oraz dni publikacji filmów publicznych i niepublicznych. Opis YouTube zawiera tylko nazwę, datę, lokalizację, typ i poziom zawodów oraz hashtagi tworzone z tych pól — nie kopiuje całego pliku z opisem zawodów.
 
 Standardowe uruchomienie montuje filmy i zmienia ich nazwy, ale nie uruchamia połączenia z YouTube. Opcja `/yt` lub `--yt` po zakończeniu montażu uruchamia **tylko podgląd** kolejki — nic nie jest przesyłane:
 
@@ -281,6 +281,38 @@ python ipsc_automato.py --yt --publish
 | `python youtube_upload.py [plik\|folder] [--publish]` | Bezpośrednie wywołanie uploadera (domyślnie folder `Gotowe`); to samo robi zakładka **YouTube** w aplikacji |
 
 `--publish` bez `/yt` lub `--yt` jest odrzucane. Film pionowy lub kwadratowy (Short) może trwać maksymalnie 3 minuty; filmy poziome nie mają tego limitu. Przy wielu plikach uploader planuje najwyżej jedną publikację dziennie na wybranym kanale. Jeśli OAuth zwróci więcej niż jeden kanał, ustaw zmienną środowiskową `YOUTUBE_CHANNEL_ID` na ID właściwego kanału. Google może wymagać weryfikacji projektu OAuth, zanim filmy przesyłane przez API będą mogły być publiczne.
+
+### Opcje publikacji w terminalu
+
+Wszystkie poniższe opcje działają po montażu, w tej kolejności: Cloudflare R2 → Buffer → YouTube. Są też dostępne w aplikacji desktopowej. Kod wyjścia to `0` przy sukcesie i `1`, gdy wystąpił błąd.
+
+| Flaga                              | Działanie                                                                                                         | Wymaga                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `--schedule "pon=07:30,sob=10:00"` | Harmonogram publikacji YouTube w tygodniu (dni: `pon`, `wt`, `sr`, `czw`, `pt`, `sob`, `nd`)                      | `--yt --publish`           |
+| `--publish-now`                    | Publikuje na YouTube od razu, bez harmonogramu (wyklucza się z `--schedule`)                                      | `--yt --publish`           |
+| `--unlisted`                       | Dodatkowo wysyła na YouTube wersję **unlisted** i wypisuje link `youtu.be`                                        | `--yt --publish`           |
+| `--cloudflare`                     | Wysyła MP4 z folderu `Gotowe` na bucket Cloudflare R2 i dopisuje linki do `buffer.txt`                             | konfiguracja R2 w `settings.json` |
+| `--buffer`                         | Tworzy szkice w Buffer z linków z `buffer.txt`                                                                     | `--buffer-platforms`       |
+| `--buffer-platforms facebook,instagram,x` | Platformy Buffer (`x` można zapisać jako `twitter`)                                                        | `--buffer`                 |
+| `--buffer-post-type reel\|post\|story` | Typ posta dla Facebooka i Instagrama (domyślnie `reel`)                                                       | `--buffer`                 |
+| `--buffer-schedule "pon=07:30,sob=10:00"` | Harmonogram szkiców Buffer; bez tej opcji szkice trafiają w pierwsze wolne terminy domyślne                 | `--buffer`                 |
+
+Opisy dla Buffer pochodzą z pliku `opis_zawodow.txt` (ten sam plik, którego używa aplikacja desktopowa). Dla Instagrama użyte są maksymalnie 5 hashtagów, a dla X obowiązuje limit 280 znaków.
+
+Przykłady:
+
+```bash
+# Montaż, upload na R2, szkice Buffer na Facebooku i Instagramie
+python ipsc_automato.py --cloudflare --buffer --buffer-platforms facebook,instagram --buffer-post-type reel
+
+# Montaż i publikacja na YouTube w wybrane dni, z wersją unlisted
+python ipsc_automato.py --yt --publish --schedule "pon=07:30,sob=10:00" --unlisted
+
+# Montaż i natychmiastowa publikacja na YouTube
+python ipsc_automato.py --yt --publish --publish-now
+```
+
+Flagi `--publish`, `--schedule`, `--publish-now` i `--unlisted` wymagają `--yt`. Flagi `--buffer-platforms`, `--buffer-post-type` i `--buffer-schedule` wymagają `--buffer`. Opcja `--buffer` wymaga `--buffer-platforms`. Buffer i Cloudflare działają tylko po montażu, bo są uruchamiane po nim w tym samym przebiegu.
 
 ## 📣 Publikacja na Facebooku, Instagramie i X przez Buffer
 
@@ -381,3 +413,13 @@ Link jest dopisywany po każdym pliku, więc przerwana wysyłka nie gubi już wy
 - **Cloudflare: „Nieprawidłowy adres CLOUDFLARE_API”:** Adres musi kończyć się nazwą bucketa, np. `https://<ID_KONTA>.r2.cloudflarestorage.com/buffer-api`.
 - **Cloudflare: „W folderze nie ma plików MP4”:** Wybrany folder nie zawiera plików `.mp4`. Wskaż właściwy folder przyciskiem **Przeglądaj…**.
 - **Buffer: film nie pojawia się w Buffer po publikacji:** Sprawdź, czy link z `buffer.txt` otwiera się w przeglądarce bez logowania. Jeśli nie, włącz Public access dla bucketa w Cloudflare R2.
+
+## 🌐 Znajdź mnie w sieci
+
+Ikony prowadzą do profili autora na GitHubie i w mediach społecznościowych:
+
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/bartosz-zarzyczny)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/@Mr_BartekZ)
+[![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://www.instagram.com/mr_bartekz/)
+[![Facebook](https://img.shields.io/badge/Facebook-0866FF?style=for-the-badge&logo=facebook&logoColor=white)](https://www.facebook.com/profile.php?id=61587533125970)
+[![X](https://img.shields.io/badge/X-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/Mr_BartekZ)

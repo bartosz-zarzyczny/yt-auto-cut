@@ -9,6 +9,8 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.s3.transfer import TransferConfig
 
+from app_settings import saved_cloudflare_settings
+
 VIDEO_EXTENSION = ".mp4"
 VIDEO_CONTENT_TYPE = "video/mp4"
 REGION = "auto"
@@ -165,3 +167,16 @@ def upload_folder(
         on_link(link)
     log(f"[Cloudflare] Wysłano: {sent}, już istniały: {existing}, błędy: {failed}.")
     return sent, existing, failed
+
+
+def upload_to_configured_bucket(folder: Path, list_path: Path, log: Callable[[str], None]) -> int:
+    """Wysyła MP4 z folderu na bucket z settings.json; zwraca liczbę błędów (0 = sukces)."""
+    try:
+        config = build_config(saved_cloudflare_settings())
+        _sent, _existing, failed = upload_folder(
+            config, folder, list_path, log, on_link=lambda _link: None
+        )
+    except (CloudflareUploadError, BotoCoreError, ClientError, OSError) as error:
+        log(f"[Cloudflare] BŁĄD: {error}")
+        return 1
+    return 1 if failed else 0
