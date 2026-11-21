@@ -103,6 +103,7 @@ except Exception as import_error:
         dodaj_napisy: bool = True
         plik_logo: str = ""
         tryb_wynikow: str = TRYB_WYNIKOW_PRACTISCORE
+        add_video_texts: bool = True
 
 
 BUFFER_VIDEO_LIST_PATH = str(PROJECT_DIR / "buffer.txt")
@@ -461,9 +462,9 @@ class MainWindow(QMainWindow):
         paths_layout.setSpacing(12)
         self._add_path_field(paths_layout, "folder_wejsciowy", "Nagrania źródłowe", "dir")
         self._add_path_field(paths_layout, "folder_wyjsciowy", "Gotowe filmy", "dir")
-        self.subtitles_check = QCheckBox("Czy dodać napisy")
+        self.subtitles_check = QCheckBox("Czy dodać wyniki")
         self.subtitles_check.setToolTip(
-            "Steruje tylko planszą z wynikami na dole filmu. Teksty wideo zależą od zawartości pliku tekstów."
+            "Steruje tylko planszą z wynikami na dole filmu."
         )
         self.subtitles_check.setChecked(
             str(self.settings.value("dodaj_napisy", "false")).lower() == "true"
@@ -550,7 +551,14 @@ class MainWindow(QMainWindow):
         logo_layout.addWidget(logo_hint)
         layout.addWidget(logo)
         layout.addWidget(self._build_imagemagick())
-        layout.addWidget(self._create_editor("plik_z_tekstami", "Teksty wideo"))
+        video_texts_editor = self._create_editor("plik_z_tekstami", "Teksty wideo")
+        self.video_texts_check = QCheckBox("Czy dodać teksty wideo")
+        self.video_texts_check.setChecked(
+            str(self.settings.value("add_video_texts", "true")).lower() == "true"
+        )
+        self.video_texts_check.toggled.connect(self._remember_video_texts)
+        video_texts_editor.layout().insertWidget(0, self.video_texts_check)
+        layout.addWidget(video_texts_editor)
         layout.addWidget(self._create_editor("plik_opisu_zawodow", "Opis zawodów"))
         layout.addStretch(1)
         page.setObjectName("scrollPage")
@@ -1409,6 +1417,9 @@ class MainWindow(QMainWindow):
     def _remember_subtitles(self, checked: bool = False):
         self.settings.setValue("dodaj_napisy", "true" if checked else "false")
 
+    def _remember_video_texts(self, checked: bool = False):
+        self.settings.setValue("add_video_texts", "true" if checked else "false")
+
     def _default_orientation(self) -> str:
         return "H" if self.radio_horizontal.isChecked() else "V"
 
@@ -1604,6 +1615,7 @@ class MainWindow(QMainWindow):
             domyslna_orientacja=self._default_orientation(),
             dodaj_napisy=self.subtitles_check.isChecked(),
             tryb_wynikow=self._selected_results_mode(),
+            add_video_texts=self.video_texts_check.isChecked(),
         )
 
     def _start(self):
@@ -1623,6 +1635,8 @@ class MainWindow(QMainWindow):
         for key, label, kind in self.PATHS:
             path = getattr(config, key)
             if key in self.SUBTITLE_PATH_KEYS and not config.dodaj_napisy:
+                continue
+            if key == "plik_z_tekstami" and not config.add_video_texts:
                 continue
             if kind == "dir" and not path.is_dir():
                 QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: folder nie istnieje.\n{path}")
