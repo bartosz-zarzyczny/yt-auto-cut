@@ -48,6 +48,19 @@ def _wyciagnij_audio(sciezka_wideo, cancel_event: Optional[Event] = None):
     return np.frombuffer(surowe, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+PEAK_HALF_WIDTH = 2  # liczba binów po każdej stronie piku wliczanych do koncentracji
+
+
+def energy_near_peak(energy, peak_indices):
+    """Suma energii w oknie +-PEAK_HALF_WIDTH binów wokół piku, dla każdej ramki naraz (bez pętli w Pythonie)."""
+    padded = np.pad(energy, ((PEAK_HALF_WIDTH, PEAK_HALF_WIDTH), (0, 0)))
+    columns = np.arange(energy.shape[1])
+    return sum(
+        padded[peak_indices + PEAK_HALF_WIDTH + offset, columns]
+        for offset in range(-PEAK_HALF_WIDTH, PEAK_HALF_WIDTH + 1)
+    )
+
+
 def znajdz_sygnaly_timera(sciezka_wideo, cancel_event: Optional[Event] = None):
     """Zwraca listę (czas_s, częstotliwość_Hz) wykrytych sygnałów timera."""
     if cancel_event and cancel_event.is_set():
@@ -70,10 +83,7 @@ def znajdz_sygnaly_timera(sciezka_wideo, cancel_event: Optional[Event] = None):
 
     energia = (pasmo ** 2)
     calkowita = energia.sum(axis=0) + 1e-12
-    blisko = np.zeros(pasmo.shape[1])
-    for i in range(pasmo.shape[1]):
-        lo, hi = max(idx[i] - 2, 0), idx[i] + 3
-        blisko[i] = energia[lo:hi, i].sum()
+    blisko = energy_near_peak(energia, idx)
     koncentracja = blisko / calkowita
 
     prog = np.percentile(amp, PERCENTYL_GLOSNOSCI)

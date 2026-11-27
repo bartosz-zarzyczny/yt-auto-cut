@@ -2,7 +2,7 @@ import re
 import os
 from typing import Callable, Optional
 
-from moviepy.editor import TextClip
+from text_render import text_clip
 
 MAX_TEXTS = 5
 MIN_TEXT_DURATION = 5.0     # s
@@ -45,7 +45,7 @@ def plan_timings(text_count, video_length):
 def create_text_clips(
     path, video_length, log_callback: Optional[Callable[[str], None]] = None
 ):
-    """Zwraca listę TextClip do nałożenia w górnej części wideo."""
+    """Zwraca listę klipów z tekstami do nałożenia w górnej części wideo."""
     def report(text):
         print(text)
         if log_callback:
@@ -57,10 +57,9 @@ def create_text_clips(
         report(f"[TEKSTY] Film za krótki - użyto {len(plan)} z {len(texts)} tekstów.")
     clips = []
     for text, (start, duration) in zip(texts, plan):
-        clip = TextClip(text, fontsize=60, color=COLOR, font=FONT_PATH,
-                        stroke_color=OUTLINE_COLOR, stroke_width=2, method="caption",
-                        size=(WIDTH, None), align="center")
-        clip = (clip.set_start(start).set_duration(duration)
+        clip = text_clip(text, duration, font_path=FONT_PATH, font_size=60, color=COLOR,
+                         stroke_color=OUTLINE_COLOR, stroke_width=2, max_width=WIDTH)
+        clip = (clip.set_start(start)
                 .set_position(("center", 0.07), relative=True)
                 .crossfadein(0.4).crossfadeout(0.4))
         clips.append(clip)

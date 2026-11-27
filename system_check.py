@@ -1,5 +1,4 @@
 import importlib
-import os
 import platform
 import shutil
 import subprocess
@@ -8,13 +7,11 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import List
 
-from app_settings import find_imagemagick
 # (nazwa pakietu w pip, wymagana wersja)
 LIBRARIES = (
     ("moviepy", "<2.0.0"),
     ("decorator", "==4.4.2"),
     ("numpy", ""),
-    ("librosa", ""),
     ("scipy", ""),
     ("Pillow", ""),
     ("PySide6", ">=6.5,<7"),
@@ -23,9 +20,8 @@ LIBRARIES = (
     ("google-auth-oauthlib", ""),
     ("google-auth-httplib2", ""),
     ("tzdata", ""),
+    ("boto3", ">=1.36"),
 )
-
-IMAGEMAGICK_WINDOWS = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 
 # Sprzętowe kodeki H.264 w kolejności prób. AMF ma własne nazwy presetów (speed/balanced/quality).
 HARDWARE_CODECS_WINDOWS_LINUX = ("h264_nvenc", "h264_amf", "h264_qsv")
@@ -142,16 +138,6 @@ def _ffmpeg_instructions():
     return "Zainstaluj FFmpeg z libx264: sudo apt install ffmpeg"
 
 
-def _imagemagick_instructions():
-    system = platform.system()
-    if system == "Darwin":
-        return "Zainstaluj: brew install imagemagick"
-    if system == "Windows":
-        return ("Pobierz z https://imagemagick.org/script/download.php#windows i przy instalacji "
-                "zaznacz 'Install legacy utilities (e.g. convert)' oraz dodanie do PATH.")
-    return "Zainstaluj: sudo apt install imagemagick"
-
-
 def _find_ffmpeg():
     """FFmpeg używany przez MoviePy (jeśli dostępny), w przeciwnym razie z PATH."""
     try:
@@ -188,15 +174,6 @@ def check_software() -> List[CheckResult]:
                 "Kodek sprzętowy (opcjonalny)", True, "niedostępny",
                 f"Sprawdzono: {', '.join(checked)}. Montaż użyje libx264 (wolniej, ale działa wszędzie)"))
 
-    path = find_imagemagick()
-    if not path and platform.system() == "Windows" and os.path.isfile(IMAGEMAGICK_WINDOWS):
-        path = IMAGEMAGICK_WINDOWS
-    if not path:
-        results.append(CheckResult("ImageMagick", False, "brak", "Potrzebny do napisów",
-                                   _imagemagick_instructions()))
-    else:
-        version = " ".join((_first_line([path, "-version"]) or "nieznana").split()[:3])
-        results.append(CheckResult("ImageMagick", True, version, path))
     return results
 
 

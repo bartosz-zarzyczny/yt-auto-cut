@@ -20,13 +20,13 @@ def determine_trim(signals, run_time: Optional[float], video_length):
     return start, end
 
 
-def trim_video(
-    video,
+def choose_trim_range(
     signals,
     run_time: Optional[float],
+    video_length: float,
     log_callback: Optional[Callable[[str], None]] = None,
 ):
-    """Przycina klip do przebiegu i wypisuje informację na konsoli."""
+    """Wylicza zakres przycięcia i wypisuje informację; None = zostaje pełny film."""
     def report(text, kolor=None):
         print(f"{kolor}{text}{RESET}" if kolor else text)
         if log_callback:
@@ -34,13 +34,26 @@ def trim_video(
 
     if run_time is None:
         report("[PRZYCIĘCIE] Pominięto - brak czasu przebiegu w wynikach, zostaje pełny film.")
-        return video
+        return None
 
-    result = determine_trim(signals, run_time, video.duration)
+    result = determine_trim(signals, run_time, video_length)
     if result is None:
         report("[PRZYCIĘCIE] Pominięto - brak jednoznacznego wykrycia timera, zostaje pełny film.", RED)
-        return video
+        return None
 
     start, end = result
     report(f"[PRZYCIĘCIE] {start:.2f}s -> {end:.2f}s (czas przebiegu {run_time:.2f}s)")
-    return video.subclip(start, end)
+    return result
+
+
+def trim_video(
+    video,
+    signals,
+    run_time: Optional[float],
+    log_callback: Optional[Callable[[str], None]] = None,
+):
+    """Przycina klip do przebiegu i wypisuje informację na konsoli."""
+    result = choose_trim_range(signals, run_time, video.duration, log_callback)
+    if result is None:
+        return video
+    return video.subclip(*result)

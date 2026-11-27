@@ -1,5 +1,6 @@
 import re
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -14,7 +15,7 @@ from functools import partial
 from threading import Event
 from typing import Dict, Optional
 from PySide6.QtCore import QObject, QSettings, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -35,8 +36,10 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
+    QSystemTrayIcon,
     QTabWidget,
     QTextBrowser,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -44,18 +47,41 @@ from PySide6.QtWidgets import (
 from dataclasses import dataclass
 from file_migration import fix_path, move_old_files
 from app_settings import (
+    CLOUDFLARE_KEYS,
+    KEY_BUFFER_API,
+    KEY_CLOUDFLARE_ACCESS_KEY_ID,
+    KEY_CLOUDFLARE_ENDPOINT,
+    KEY_CLOUDFLARE_PUBLIC_URL,
+    KEY_CLOUDFLARE_SECRET_ACCESS_KEY,
     SETTINGS_FILE,
     ensure_settings_file,
+    load_settings,
+    save_settings,
     saved_buffer_api_key,
     saved_cloudflare_settings,
-    saved_imagemagick_path,
-    save_imagemagick_path,
 )
 from system_check import format_html, run_system_check
+from ui_icons import icon
+from ui_theme import (
+    THEME_CHOICES,
+    THEME_SYSTEM,
+    build_stylesheet,
+    monospace_family,
+    resolve_palette,
+)
 
 PROJECT_DIR = Path(__file__).resolve().parent
 WEEKDAY_NAMES = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"]
 PUBLISH_TIMES = [f"{g:02d}:{m:02d}" for g in range(24) for m in range(0, 60, 15)]
+SOCIAL_LINKS = (
+    ("GitHub", "https://github.com/bartosz-zarzyczny"),
+    ("YouTube", "https://www.youtube.com/@Mr_BartekZ"),
+    ("Instagram", "https://www.instagram.com/mr_bartekz/"),
+    ("Facebook", "https://www.facebook.com/profile.php?id=61587533125970"),
+    ("X", "https://x.com/Mr_BartekZ"),
+)
+PROGRESS_STEPS = 1000  # rozdzielczość paska postępu montażu
+AUTOSAVE_DELAY_MS = 800  # zapis edytora po tej przerwie w pisaniu
 move_old_files(PROJECT_DIR)
 ensure_settings_file()
 
@@ -104,6 +130,9 @@ except Exception as import_error:
         plik_logo: str = ""
         tryb_wynikow: str = TRYB_WYNIKOW_PRACTISCORE
         add_video_texts: bool = True
+        add_music: bool = True
+        trim_only: bool = False
+        overwrite_existing: bool = False
 
 
 BUFFER_VIDEO_LIST_PATH = str(PROJECT_DIR / "buffer.txt")
@@ -114,9 +143,21 @@ RESULTS_MODES = (
 )
 
 
+def format_duration(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes} min {seconds:02d} s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes:02d} min"
+
+
 class AssemblyWorker(QObject):
     log = Signal(str)
     progress = Signal(int, int, str, str)
+    render_progress = Signal(float)
     completed = Signal(bool, str)
 
     def __init__(self, config: KonfiguracjaSciezek, cancel_event: Event):
@@ -134,6 +175,7 @@ class AssemblyWorker(QObject):
                 log_callback=self.log.emit,
                 progress_callback=self._report_progress,
                 cancel_event=self.cancel_event,
+                render_progress_callback=self.render_progress.emit,
             )
         except Exception as error:
             self.log.emit(f"BŁĄD: {error}")
@@ -160,7 +202,7 @@ class AssemblyWorker(QObject):
     def _report_progress(self, index: int, total: int, name: str, status: str):
         if status == "error":
             self.error_count += 1
-        elif status == "done":
+        elif status in ("done", "exists"):
             self.completed_count += 1
         elif status == "skipped":
             self.skipped_count += 1
@@ -359,12 +401,24 @@ class MainWindow(QMainWindow):
         self.test_thread: Optional[QThread] = None
         self.test_worker: Optional[SystemCheckWorker] = None
         self._test_automatic = False
+        self._icon_widgets = []
+        self._autosave_timers: Dict[str, QTimer] = {}
+        self._path_errors: Dict[str, QLabel] = {}
+        self._render_started_at: Optional[float] = None
+        self._current_video = (0, 0, "")
+        self.theme_mode = str(self.settings.value("theme", THEME_SYSTEM))
+        app = QApplication.instance()
+        self.colors = resolve_palette(app, self.theme_mode)
+        self.tray_icon: Optional[QSystemTrayIcon] = None
         self.setWindowTitle("IPSC Video Automato")
         self.resize(1120, 850)
         self.setMinimumSize(860, 680)
         self._build_ui()
         self._load_settings()
         self._load_startup_files()
+        self._install_shortcuts()
+        if hasattr(app.styleHints(), "colorSchemeChanged"):
+            app.styleHints().colorSchemeChanged.connect(self._on_system_theme_changed)
 
     def _build_ui(self):
         central = QWidget(self)
@@ -403,53 +457,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_help, "  Pomoc  ")
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget { background: #10151d; color: #e7edf5; }
-            QWidget { font-family: "Segoe UI", sans-serif; font-size: 10pt; }
-            QLabel#brand { color: #43e0c1; font-size: 17pt; font-weight: 800; }
-            QLabel#brandTitle { color: #f3f6fa; font-size: 17pt; font-weight: 700; letter-spacing: 1px; }
-            QLabel#eyebrow { color: #8492a6; font-size: 8pt; letter-spacing: 1px; }
-            QLabel#subtitle { color: #91a0b4; font-size: 10pt; padding-bottom: 3px; }
-            QTabWidget::pane { border: 1px solid #283343; border-radius: 12px; top: -1px; }
-            QTabBar::tab { background: #171f2a; color: #93a2b6; padding: 12px 18px; margin-right: 5px;
-                           border-top-left-radius: 8px; border-top-right-radius: 8px; }
-            QTabBar::tab:selected { background: #202b39; color: #53e2c3; font-weight: 700; }
-            QGroupBox { background: #171f2a; border: 1px solid #283343; border-radius: 11px;
-                        margin-top: 12px; padding: 18px 16px 14px; font-weight: 650; }
-            QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 6px; color: #c7d2e0; }
-            QLineEdit, QPlainTextEdit { background: #0f151d; color: #e7edf5; border: 1px solid #344255;
-                                        border-radius: 7px; padding: 9px 11px; selection-background-color: #147d72; }
-            QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #43cdb1; }
-            QPlainTextEdit { font-family: "Cascadia Code", "Consolas", monospace; }
-            QPushButton { background: #263344; color: #dce6f1; border: 1px solid #39495e;
-                          border-radius: 7px; padding: 9px 14px; font-weight: 600; }
-            QPushButton:hover { background: #33445a; border-color: #4e647e; }
-            QPushButton:disabled { color: #738095; background: #202a37; }
-            QPushButton#primary { background: #087f70; border: 1px solid #14a18b; color: white;
-                                  padding: 11px 20px; font-size: 10pt; }
-            QPushButton#primary:hover { background: #099782; }
-            QPushButton#danger { color: #ffc2c2; border-color: #70434a; background: #35252b; }
-            QLabel#muted { color: #8998ac; }
-            QRadioButton { spacing: 8px; padding: 4px 8px; background: transparent; }
-            QCheckBox { spacing: 8px; padding: 4px 2px; background: transparent; }
-            QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px;
-                                   border: 2px solid #4e647e; background: #0f151d; }
-            QCheckBox::indicator:checked { border-color: #43cdb1; background: #24b99f; }
-            QRadioButton::indicator { width: 16px; height: 16px; border-radius: 9px;
-                                      border: 2px solid #4e647e; background: #0f151d; }
-            QRadioButton::indicator:checked { border-color: #43cdb1; background: #24b99f; }
-            QPushButton#helpButton { padding: 0; border-radius: 15px; font-weight: 800; color: #53e2c3; }
-            QToolTip { background: #202b39; color: #e7edf5; border: 1px solid #43cdb1; padding: 6px 8px; }
-            QLabel#fileStatus { color: #91a0b4; font-size: 9pt; }
-            QTextBrowser { background: #0f151d; border: 1px solid #283343; border-radius: 10px; padding: 14px; }
-            QProgressBar { background: #0c1118; border: 1px solid #2d3949; border-radius: 5px;
-                           height: 12px; text-align: center; color: transparent; }
-            QProgressBar::chunk { background: #24b99f; border-radius: 4px; }
-            QScrollBar:vertical { background: #111821; width: 10px; margin: 0; }
-            QScrollBar::handle:vertical { background: #344255; min-height: 24px; border-radius: 4px; }
-            """
-        )
+        self._apply_theme()
 
     def _build_main_tab(self):
         page = QWidget()
@@ -470,61 +478,183 @@ class MainWindow(QMainWindow):
             str(self.settings.value("dodaj_napisy", "false")).lower() == "true"
         )
         self.subtitles_check.toggled.connect(self._remember_subtitles)
-        layout.addWidget(self.subtitles_check)
         layout.addWidget(paths)
+        layout.addWidget(self._build_assembly_mode())
 
         bar = QHBoxLayout()
+        status_column = QVBoxLayout()
+        status_column.setSpacing(2)
         self.status = QLabel("Gotowy do pracy")
-        self.status.setObjectName("muted")
-        self.start_button = QPushButton("▶  Rozpocznij montaż")
+        self.status.setObjectName("statusTitle")
+        self.status_detail = QLabel("Wybierz nagrania i kliknij przycisk, aby zacząć.")
+        self.status_detail.setObjectName("muted")
+        status_column.addWidget(self.status)
+        status_column.addWidget(self.status_detail)
+        self.start_button = QPushButton(self.start_button_text)
         self.start_button.setObjectName("primary")
-        self.start_button.setMinimumHeight(44)
+        self.start_button.setMinimumHeight(42)
+        self.start_button.setToolTip("Skrót: Ctrl+Enter (na Macu ⌘+Enter)")
         self.start_button.clicked.connect(self._start)
-        self.cancel_button = QPushButton("Przerwij generowanie")
+        self._set_icon(self.start_button, "scissors" if self.mode_trim_only.isChecked() else "play", "on_accent")
+        self.cancel_button = QPushButton("Przerwij")
         self.cancel_button.setObjectName("danger")
-        self.cancel_button.setMinimumHeight(44)
+        self.cancel_button.setMinimumHeight(42)
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._cancel)
-        bar.addWidget(self.status, 1)
+        self._set_icon(self.cancel_button, "stop", "danger_text")
+        bar.addLayout(status_column, 1)
         bar.addWidget(self.start_button)
         bar.addWidget(self.cancel_button)
         layout.addLayout(bar)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setRange(0, PROGRESS_STEPS)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
 
-        log_group = QGroupBox("Dziennik pracy")
-        log_layout = QVBoxLayout(log_group)
+        log_bar = QHBoxLayout()
+        self.log_toggle = QToolButton()
+        self.log_toggle.setCheckable(True)
+        self.log_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.log_toggle.toggled.connect(self._toggle_log)
+        self._set_icon(self.log_toggle, "list")
+        copy_log = QToolButton()
+        copy_log.setText("Kopiuj dziennik")
+        copy_log.setToolTip("Kopiuje cały dziennik do schowka — przydatne przy zgłaszaniu problemu.")
+        copy_log.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        copy_log.clicked.connect(self._copy_log)
+        self._set_icon(copy_log, "copy")
+        log_bar.addWidget(self.log_toggle)
+        log_bar.addWidget(copy_log)
+        log_bar.addStretch(1)
+        layout.addLayout(log_bar)
+
+        self.log_group = QGroupBox("Dziennik pracy")
+        log_layout = QVBoxLayout(self.log_group)
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("Tutaj pojawią się postęp montażu i komunikaty aplikacji.")
         log_layout.addWidget(self.log_view)
-        layout.addWidget(log_group, 1)
-
-        social_links = QHBoxLayout()
-        social_links.setSpacing(8)
-        social_label = QLabel("Znajdź mnie:")
-        social_label.setObjectName("muted")
-        social_links.addWidget(social_label)
-        for icon, name, url in (
-            ("🐙", "GitHub", "https://github.com/bartosz-zarzyczny"),
-            ("▶", "YouTube", "https://www.youtube.com/@Mr_BartekZ"),
-            ("◎", "Instagram", "https://www.instagram.com/mr_bartekz/"),
-            ("f", "Facebook", "https://www.facebook.com/profile.php?id=61587533125970"),
-            ("𝕏", "X", "https://x.com/Mr_BartekZ"),
-        ):
-            button = QPushButton(f"{icon}  {name}")
-            button.setToolTip(f"Otwórz profil {name}")
-            button.clicked.connect(
-                lambda _checked=False, target_url=url: QDesktopServices.openUrl(QUrl(target_url))
-            )
-            social_links.addWidget(button)
-        social_links.addStretch(1)
-        layout.addLayout(social_links)
+        layout.addWidget(self.log_group, 1)
+        self.log_spacer = QWidget()
+        layout.addWidget(self.log_spacer, 1)
+        self.log_toggle.setChecked(str(self.settings.value("log_visible", "false")).lower() == "true")
+        self._toggle_log(self.log_toggle.isChecked())
         return page
+
+    def _toggle_log(self, visible: bool):
+        self.log_group.setVisible(visible)
+        self.log_spacer.setVisible(not visible)
+        self.log_toggle.setText("Ukryj dziennik" if visible else "Pokaż dziennik")
+        self.settings.setValue("log_visible", "true" if visible else "false")
+
+    def _copy_log(self, checked: bool = False):
+        del checked
+        QGuiApplication.clipboard().setText(self.log_view.toPlainText())
+        self.status_detail.setText("Dziennik skopiowano do schowka.")
+
+    # --- motyw i ikony ---
+    def _set_icon(self, widget, name: str, role: str = "text"):
+        self._icon_widgets.append((widget, name, role))
+        widget.setIcon(icon(name, self.colors[role]))
+
+    def _apply_theme(self):
+        app = QApplication.instance()
+        self.colors = resolve_palette(app, self.theme_mode)
+        app.setStyleSheet(build_stylesheet(self.colors, monospace_family()))
+        for widget, name, role in self._icon_widgets:
+            widget.setIcon(icon(name, self.colors[role]))
+        if hasattr(self, "help_browser"):
+            self._render_help()
+
+    def _on_system_theme_changed(self, *_):
+        if self.theme_mode == THEME_SYSTEM:
+            self._apply_theme()
+
+    def _set_theme_mode(self, mode: str):
+        self.theme_mode = mode
+        self.settings.setValue("theme", mode)
+        self._apply_theme()
+
+    def _install_shortcuts(self):
+        # Qt zamienia Ctrl na ⌘ na macOS.
+        for sequence in ("Ctrl+Return", "Ctrl+Enter"):
+            QShortcut(QKeySequence(sequence), self, activated=self._start_from_shortcut)
+        QShortcut(QKeySequence.StandardKey.Save, self, activated=self._save_all_editors)
+
+    def _start_from_shortcut(self):
+        if self.start_button.isEnabled():
+            self.tabs.setCurrentWidget(self.tab_main)
+            self._start()
+
+    def _save_all_editors(self):
+        for key, _ in self.EDITORS:
+            self._autosave(key)
+        self.status_detail.setText("Zapisano wszystkie pliki.")
+
+    def _build_assembly_mode(self):
+        group = QGroupBox("Rodzaj montażu")
+        layout = QVBoxLayout(group)
+        modes = QHBoxLayout()
+        self.mode_full = QRadioButton("Pełny montaż")
+        self.mode_full.setToolTip("Przycięcie, muzyka, wyniki, teksty wideo, logo i zmiana rozdzielczości.")
+        self.mode_trim_only = QRadioButton("Tylko przycięcie")
+        self.mode_trim_only.setToolTip(
+            "Szybko: film przycięty do przebiegu, bez muzyki, napisów i logo. "
+            "Obraz nie jest kodowany ponownie, więc start może wypaść ułamek sekundy wcześniej."
+        )
+        mode_group = QButtonGroup(self)
+        mode_group.addButton(self.mode_full)
+        mode_group.addButton(self.mode_trim_only)
+        trim_only = str(self.settings.value("trim_only", "false")).lower() == "true"
+        (self.mode_trim_only if trim_only else self.mode_full).setChecked(True)
+        modes.addWidget(self.mode_full)
+        modes.addWidget(self.mode_trim_only)
+        modes.addStretch(1)
+        layout.addLayout(modes)
+
+        options = QHBoxLayout()
+        self.music_check = QCheckBox("Dodaj muzykę")
+        self.music_check.setChecked(str(self.settings.value("add_music", "true")).lower() == "true")
+        self.music_check.toggled.connect(
+            lambda checked: self.settings.setValue("add_music", "true" if checked else "false")
+        )
+        self.overwrite_check = QCheckBox("Nadpisuj gotowe filmy")
+        self.overwrite_check.setToolTip(
+            "Odznaczone: nagrania, które mają już gotowy film w folderze wyjściowym, są pomijane."
+        )
+        self.overwrite_check.setChecked(
+            str(self.settings.value("overwrite_existing", "false")).lower() == "true"
+        )
+        self.overwrite_check.toggled.connect(
+            lambda checked: self.settings.setValue("overwrite_existing", "true" if checked else "false")
+        )
+        options.addWidget(self.subtitles_check)
+        options.addWidget(self.music_check)
+        options.addWidget(self.overwrite_check)
+        options.addStretch(1)
+        layout.addLayout(options)
+
+        hint = QLabel("Montaż niczego nie publikuje. Sprawdź filmy, a potem wyślij je w zakładkach YouTube i Buffer.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.mode_trim_only.toggled.connect(self._on_assembly_mode_changed)
+        self._on_assembly_mode_changed()
+        return group
+
+    def _on_assembly_mode_changed(self, *_):
+        trim_only = self.mode_trim_only.isChecked()
+        self.settings.setValue("trim_only", "true" if trim_only else "false")
+        self.subtitles_check.setEnabled(not trim_only)
+        self.music_check.setEnabled(not trim_only)
+        self.start_button_text = "Rozpocznij przycinanie" if trim_only else "Rozpocznij montaż"
+        if hasattr(self, "start_button"):
+            self.start_button.setText(self.start_button_text)
+            self._icon_widgets = [entry for entry in self._icon_widgets if entry[0] is not self.start_button]
+            self._set_icon(self.start_button, "scissors" if trim_only else "play", "on_accent")
 
     def _build_config_tab(self):
         page = QWidget()
@@ -543,14 +673,13 @@ class MainWindow(QMainWindow):
         logo_layout = QVBoxLayout(logo)
         self._add_path_field(logo_layout, "plik_logo", "Plik logo", "image")
         logo_hint = QLabel(
-            "Logo pojawi się w prawym górnym rogu (maks. 250×250 px, proporcje zachowane). "
+            "Logo pojawi się w prawym górnym rogu (maks. 200×200 px, proporcje zachowane). "
             "Puste pole = bez logo."
         )
         logo_hint.setObjectName("muted")
         logo_hint.setWordWrap(True)
         logo_layout.addWidget(logo_hint)
         layout.addWidget(logo)
-        layout.addWidget(self._build_imagemagick())
         video_texts_editor = self._create_editor("plik_z_tekstami", "Teksty wideo")
         self.video_texts_check = QCheckBox("Czy dodać teksty wideo")
         self.video_texts_check.setChecked(
@@ -560,6 +689,8 @@ class MainWindow(QMainWindow):
         video_texts_editor.layout().insertWidget(0, self.video_texts_check)
         layout.addWidget(video_texts_editor)
         layout.addWidget(self._create_editor("plik_opisu_zawodow", "Opis zawodów"))
+        layout.addWidget(self._build_api_keys())
+        layout.addWidget(self._build_appearance())
         layout.addStretch(1)
         page.setObjectName("scrollPage")
         page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -570,6 +701,78 @@ class MainWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(page)
         return scroll
+
+    def _build_appearance(self):
+        group = QGroupBox("Wygląd")
+        row = QHBoxLayout(group)
+        label = QLabel("Motyw")
+        label.setMinimumWidth(150)
+        self.theme_combo = QComboBox()
+        for mode, title in THEME_CHOICES:
+            self.theme_combo.addItem(title, mode)
+        index = self.theme_combo.findData(self.theme_mode)
+        self.theme_combo.setCurrentIndex(max(index, 0))
+        self.theme_combo.currentIndexChanged.connect(
+            lambda _index: self._set_theme_mode(self.theme_combo.currentData())
+        )
+        row.addWidget(label)
+        row.addWidget(self.theme_combo)
+        row.addStretch(1)
+        return group
+
+    API_FIELDS = (
+        (KEY_BUFFER_API, "Buffer API", False, "Token z developers.buffer.com"),
+        (KEY_CLOUDFLARE_ENDPOINT, "Cloudflare: endpoint S3", False,
+         "https://<ID_KONTA>.r2.cloudflarestorage.com/<bucket>"),
+        (KEY_CLOUDFLARE_ACCESS_KEY_ID, "Cloudflare: Access Key ID", False, ""),
+        (KEY_CLOUDFLARE_SECRET_ACCESS_KEY, "Cloudflare: Secret Key", True, ""),
+        (KEY_CLOUDFLARE_PUBLIC_URL, "Cloudflare: adres publiczny", False, "https://pub-xxxx.r2.dev"),
+    )
+
+    def _build_api_keys(self):
+        group = QGroupBox("Klucze usług (Buffer, Cloudflare)")
+        layout = QVBoxLayout(group)
+        hint = QLabel(f"Wartości są zapisywane w pliku {SETTINGS_FILE.name} w folderze programu.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        stored = load_settings()
+        self.api_fields: Dict[str, QLineEdit] = {}
+        for key, title, secret, placeholder in self.API_FIELDS:
+            row = QHBoxLayout()
+            label = QLabel(title)
+            label.setMinimumWidth(200)
+            field = QLineEdit(str(stored.get(key) or ""))
+            field.setPlaceholderText(placeholder)
+            field.setClearButtonEnabled(True)
+            if secret:
+                field.setEchoMode(QLineEdit.PasswordEchoOnEdit)
+            field.editingFinished.connect(self._save_api_keys)
+            self.api_fields[key] = field
+            row.addWidget(label)
+            row.addWidget(field, 1)
+            layout.addLayout(row)
+        self.api_status = QLabel("")
+        self.api_status.setObjectName("fileStatus")
+        layout.addWidget(self.api_status)
+        return group
+
+    def _save_api_keys(self):
+        settings = load_settings()
+        changed = False
+        for key, field in self.api_fields.items():
+            value = field.text().strip()
+            if str(settings.get(key) or "") != value:
+                settings[key] = value
+                changed = True
+        if not changed:
+            return
+        try:
+            save_settings(settings)
+        except OSError as error:
+            self.api_status.setText(f"Nie udało się zapisać {SETTINGS_FILE.name}: {error}")
+            return
+        self.api_status.setText(f"Zapisano w {SETTINGS_FILE.name} ({time.strftime('%H:%M')}).")
 
     def _build_youtube_tab(self):
         page = QWidget()
@@ -598,6 +801,7 @@ class MainWindow(QMainWindow):
             lambda: self.settings.setValue("folder_youtube", self.yt_folder.text().strip())
         )
         self.yt_browse_button = QPushButton("Przeglądaj…")
+        self._set_icon(self.yt_browse_button, "folder")
         self.yt_browse_button.clicked.connect(self._choose_yt_folder)
         row.addWidget(label)
         row.addWidget(self.yt_folder, 1)
@@ -615,12 +819,14 @@ class MainWindow(QMainWindow):
         bar = QHBoxLayout()
         self.yt_status = QLabel("Gotowy do wysyłania")
         self.yt_status.setObjectName("muted")
-        self.yt_start = QPushButton("⬆  Wyślij do YT")
+        self.yt_start = QPushButton("Wyślij do YouTube")
         self.yt_start.setObjectName("primary")
+        self._set_icon(self.yt_start, "upload", "on_accent")
         self.yt_start.setMinimumHeight(44)
         self.yt_start.clicked.connect(self._send_to_yt)
         self.yt_cancel = QPushButton("Przerwij wysyłanie")
         self.yt_cancel.setObjectName("danger")
+        self._set_icon(self.yt_cancel, "stop", "danger_text")
         self.yt_cancel.setMinimumHeight(44)
         self.yt_cancel.setEnabled(False)
         self.yt_cancel.clicked.connect(self._cancel_yt)
@@ -695,12 +901,14 @@ class MainWindow(QMainWindow):
         bar = QHBoxLayout()
         self.buffer_status = QLabel("Gotowe do utworzenia szkiców")
         self.buffer_status.setObjectName("muted")
-        self.buffer_send = QPushButton("⬆  Utwórz szkice w Buffer")
+        self.buffer_send = QPushButton("Utwórz szkice w Buffer")
         self.buffer_send.setObjectName("primary")
+        self._set_icon(self.buffer_send, "upload", "on_accent")
         self.buffer_send.setMinimumHeight(44)
         self.buffer_send.clicked.connect(self._send_to_buffer)
         self.buffer_cancel = QPushButton("Przerwij")
         self.buffer_cancel.setObjectName("danger")
+        self._set_icon(self.buffer_cancel, "stop", "danger_text")
         self.buffer_cancel.setMinimumHeight(44)
         self.buffer_cancel.setEnabled(False)
         self.buffer_cancel.clicked.connect(self._cancel_buffer)
@@ -750,7 +958,9 @@ class MainWindow(QMainWindow):
             if over_limit:
                 parts.append("przekroczono limit")
             counter.setText(" · ".join(parts))
-            counter.setStyleSheet("color: #ff7b7b;" if over_limit else "")
+            counter.setObjectName("fieldError" if over_limit else "muted")
+            counter.style().unpolish(counter)
+            counter.style().polish(counter)
 
         editor.textChanged.connect(update_counter)
         update_counter()
@@ -1017,7 +1227,7 @@ class MainWindow(QMainWindow):
 
         token = saved_buffer_api_key()
         if not token:
-            QMessageBox.warning(self, "Buffer", "Brak klucza BUFFER_API w pliku settings.json.")
+            QMessageBox.warning(self, "Buffer", "Brak klucza Buffer API. Wpisz go w zakładce Konfiguracja → Klucze usług.")
             return
         platforms = self._buffer_platforms()
         if not platforms:
@@ -1101,6 +1311,7 @@ class MainWindow(QMainWindow):
         label.setMinimumWidth(150)
         self.cloudflare_folder = QLineEdit(str(self.settings.value("folder_cloudflare", FOLDER_WYJSCIOWY)))
         browse_button = QPushButton("Przeglądaj…")
+        self._set_icon(browse_button, "folder")
         browse_button.clicked.connect(self._choose_cloudflare_folder)
         row.addWidget(label)
         row.addWidget(self.cloudflare_folder, 1)
@@ -1110,11 +1321,13 @@ class MainWindow(QMainWindow):
         bar = QHBoxLayout()
         self.cloudflare_status = QLabel("Gotowe do wysyłki")
         self.cloudflare_status.setObjectName("muted")
-        self.cloudflare_send = QPushButton("⬆  Wyślij do CloudFlare")
+        self.cloudflare_send = QPushButton("Wyślij do Cloudflare")
+        self._set_icon(self.cloudflare_send, "upload")
         self.cloudflare_send.setMinimumHeight(40)
         self.cloudflare_send.clicked.connect(self._send_to_cloudflare)
         self.cloudflare_cancel = QPushButton("Przerwij")
         self.cloudflare_cancel.setObjectName("danger")
+        self._set_icon(self.cloudflare_cancel, "stop", "danger_text")
         self.cloudflare_cancel.setMinimumHeight(40)
         self.cloudflare_cancel.setEnabled(False)
         self.cloudflare_cancel.clicked.connect(self._cancel_cloudflare)
@@ -1213,59 +1426,6 @@ class MainWindow(QMainWindow):
         self.cloudflare_send.setEnabled(True)
         self.cloudflare_cancel.setEnabled(False)
 
-    def _build_imagemagick(self):
-        group = QGroupBox("ImageMagick (napisy)")
-        layout = QVBoxLayout(group)
-        row = QHBoxLayout()
-        label = QLabel("Program magick")
-        label.setMinimumWidth(150)
-        self.imagemagick_field = QLineEdit(saved_imagemagick_path())
-        self.imagemagick_field.setClearButtonEnabled(True)
-        self.imagemagick_field.setPlaceholderText("Pusto = automatyczne wyszukiwanie w PATH")
-        self.imagemagick_field.editingFinished.connect(self._save_imagemagick)
-        button = QPushButton("Przeglądaj…")
-        button.clicked.connect(self._choose_imagemagick)
-        row.addWidget(label)
-        row.addWidget(self.imagemagick_field, 1)
-        row.addWidget(button)
-        layout.addLayout(row)
-        self.imagemagick_status = QLabel("")
-        self.imagemagick_status.setObjectName("fileStatus")
-        layout.addWidget(self.imagemagick_status)
-        self._show_imagemagick_status()
-        return group
-
-    def _choose_imagemagick(self, checked: bool = False):
-        del checked
-        current = self.imagemagick_field.text().strip()
-        file_filter = "Program (*.exe);;Wszystkie pliki (*)" if sys.platform == "win32" else "Wszystkie pliki (*)"
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Wskaż program ImageMagick (magick)", current or str(Path.home()), file_filter
-        )
-        if path:
-            self.imagemagick_field.setText(str(Path(path)))
-            self._save_imagemagick()
-
-    def _save_imagemagick(self):
-        path = self.imagemagick_field.text().strip()
-        try:
-            save_imagemagick_path(path)
-        except OSError as error:
-            self.imagemagick_status.setText(f"Nie udało się zapisać settings.json: {error}")
-            return
-        self._show_imagemagick_status()
-
-    def _show_imagemagick_status(self):
-        path = self.imagemagick_field.text().strip()
-        if not path:
-            self.imagemagick_status.setText(f"Zapisano w {SETTINGS_FILE.name}: automatyczne wyszukiwanie w PATH")
-        elif Path(path).is_file():
-            self.imagemagick_status.setText(f"Zapisano w {SETTINGS_FILE.name}: {path}")
-        else:
-            self.imagemagick_status.setText(
-                f"Zapisano w {SETTINGS_FILE.name}, ale plik nie istnieje — użyty zostanie ImageMagick z PATH"
-            )
-
     def _build_help_tab(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -1273,10 +1433,11 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         bar = QHBoxLayout()
-        description = QLabel("Sprawdź wymagane biblioteki Pythona oraz FFmpeg i ImageMagick.")
+        description = QLabel("Sprawdź wymagane biblioteki Pythona, FFmpeg i kodeki wideo.")
         description.setObjectName("muted")
-        self.test_button = QPushButton("🩺  Test Systemu")
+        self.test_button = QPushButton("Test systemu")
         self.test_button.setObjectName("primary")
+        self._set_icon(self.test_button, "activity", "on_accent")
         self.test_button.clicked.connect(self._run_system_test)
         bar.addWidget(description, 1)
         bar.addWidget(self.test_button)
@@ -1287,20 +1448,39 @@ class MainWindow(QMainWindow):
         self.test_results.setVisible(False)
         layout.addWidget(self.test_results)
 
-        browser = QTextBrowser()
-        browser.setOpenExternalLinks(True)
-        browser.document().setDefaultStyleSheet(
-            "h1, h2, h3 { color: #43e0c1; } a { color: #6cb6ff; } "
-            "code, pre { color: #f0c987; background: #1b2531; } "
-            "th, td { padding: 4px 8px; }"
+        self.help_browser = QTextBrowser()
+        self.help_browser.setOpenExternalLinks(True)
+        self._render_help()
+        layout.addWidget(self.help_browser, 1)
+
+        about = QHBoxLayout()
+        about.setSpacing(4)
+        about_label = QLabel("Autor:")
+        about_label.setObjectName("muted")
+        about.addWidget(about_label)
+        for name, url in SOCIAL_LINKS:
+            link = QToolButton()
+            link.setObjectName("link")
+            link.setText(name)
+            link.setToolTip(url)
+            link.setCursor(Qt.PointingHandCursor)
+            link.clicked.connect(lambda _checked=False, target_url=url: QDesktopServices.openUrl(QUrl(target_url)))
+            about.addWidget(link)
+        about.addStretch(1)
+        layout.addLayout(about)
+        return page
+
+    def _render_help(self):
+        colors = self.colors
+        self.help_browser.document().setDefaultStyleSheet(
+            f"h1, h2, h3 {{ color: {colors['accent_text']}; }} a {{ color: {colors['accent_text']}; }} "
+            f"code, pre {{ background: {colors['surface2']}; }} th, td {{ padding: 4px 8px; }}"
         )
         readme_path = Path(__file__).resolve().parent / "README.md"
         try:
-            browser.setMarkdown(readme_path.read_text(encoding="utf-8"))
+            self.help_browser.setMarkdown(readme_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError) as error:
-            browser.setPlainText(f"Nie udało się wczytać pliku pomocy:\n{readme_path}\n\n{error}")
-        layout.addWidget(browser)
-        return page
+            self.help_browser.setPlainText(f"Nie udało się wczytać pliku pomocy:\n{readme_path}\n\n{error}")
 
     def _run_system_test(self, checked: bool = False, automatic: bool = False):
         del checked
@@ -1335,7 +1515,7 @@ class MainWindow(QMainWindow):
         else:
             self.test_results.setHtml(html)
         self.test_button.setEnabled(True)
-        self.test_button.setText("🩺  Test Systemu")
+        self.test_button.setText("Test systemu")
         if self._test_automatic and has_problems:
             self.tabs.setCurrentWidget(self.tab_help)
             self.status.setText("Wykryto braki w systemie — szczegóły w zakładce Pomoc")
@@ -1433,11 +1613,44 @@ class MainWindow(QMainWindow):
         self.fields[key] = field
         field.editingFinished.connect(partial(self._remember_path, key))
         button = QPushButton("Przeglądaj…")
+        self._set_icon(button, "folder")
         button.clicked.connect(partial(self._choose_path, key, kind))
         row.addWidget(label_widget)
         row.addWidget(field, 1)
         row.addWidget(button)
         layout.addLayout(row)
+        error = QLabel("")
+        error.setObjectName("fieldError")
+        error.setWordWrap(True)
+        error.setVisible(False)
+        self._path_errors[key] = error
+        layout.addWidget(error)
+        field.textChanged.connect(partial(self._clear_path_error, key))
+
+    def _show_path_error(self, key: str, message: str):
+        """Błąd pokazany pod polem (zamiast okienka) i przejście do zakładki z tym polem."""
+        field = self.fields[key]
+        field.setProperty("error", True)
+        field.style().unpolish(field)
+        field.style().polish(field)
+        label = self._path_errors[key]
+        label.setText(message)
+        label.setVisible(True)
+        for index in range(self.tabs.count()):
+            if self.tabs.widget(index).isAncestorOf(field):
+                self.tabs.setCurrentIndex(index)
+                break
+        field.setFocus()
+        self.status.setText("Popraw zaznaczone pole")
+        self.status_detail.setText(message)
+
+    def _clear_path_error(self, key: str, *_):
+        field = self.fields[key]
+        if field.property("error"):
+            field.setProperty("error", False)
+            field.style().unpolish(field)
+            field.style().polish(field)
+        self._path_errors[key].setVisible(False)
 
     def _create_editor(self, key: str, title: str):
         group = QGroupBox(title)
@@ -1461,13 +1674,18 @@ class MainWindow(QMainWindow):
 
         controls = QHBoxLayout()
         controls.addStretch(1)
-        load_button = QPushButton("Wczytaj z pliku")
+        load_button = QPushButton("Wczytaj ponownie")
+        load_button.setToolTip("Wczytuje treść z pliku na dysku. Zmiany w edytorze zapisują się same.")
+        self._set_icon(load_button, "refresh")
         load_button.clicked.connect(partial(self._load_file, key, True))
-        save_button = QPushButton("Zapisz do pliku")
-        save_button.clicked.connect(partial(self._save_file, key, True))
         controls.addWidget(load_button)
-        controls.addWidget(save_button)
         layout.addLayout(controls)
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(AUTOSAVE_DELAY_MS)
+        timer.timeout.connect(partial(self._autosave, key))
+        self._autosave_timers[key] = timer
         return group
 
     def _default_paths(self) -> KonfiguracjaSciezek:
@@ -1494,20 +1712,8 @@ class MainWindow(QMainWindow):
 
     def _choose_path(self, key: str, kind: str, checked: bool = False):
         del checked
-        if key in self.editors and key in self._dirty_editors:
-            decision = QMessageBox.warning(
-                self,
-                "Niezapisane zmiany",
-                "Edytor zawiera niezapisane zmiany. Zapisać je przed wyborem innego pliku?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-                QMessageBox.Save,
-            )
-            if decision == QMessageBox.Cancel:
-                return
-            if decision == QMessageBox.Save and not self._save_file(key):
-                return
-            if decision == QMessageBox.Discard:
-                self._dirty_editors.discard(key)
+        if key in self.editors and not self._autosave(key):
+            return
 
         current = Path(self.fields[key].text().strip() or ".")
         if kind == "dir":
@@ -1532,20 +1738,27 @@ class MainWindow(QMainWindow):
 
     def _mark_dirty(self, key: str):
         self._dirty_editors.add(key)
-        self.editor_status[key].setText("Niezapisane zmiany")
+        self.editor_status[key].setText("Zapisywanie…")
+        timer = self._autosave_timers.get(key)
+        if timer is not None:
+            timer.start()
+
+    def _autosave(self, key: str) -> bool:
+        """Zapisuje edytor, jeśli ma niezapisane zmiany. Zwraca False tylko przy błędzie zapisu."""
+        timer = self._autosave_timers.get(key)
+        if timer is not None:
+            timer.stop()
+        if key not in self._dirty_editors:
+            return True
+        if not self.fields[key].text().strip():
+            self.editor_status[key].setText("Wskaż plik, aby zapisać zmiany")
+            return False
+        return self._save_file(key)
 
     def _load_file(self, key: str, show_error: bool = True, checked: bool = False):
         del checked
-        if key in self._dirty_editors and show_error:
-            decision = QMessageBox.question(
-                self,
-                "Niezapisane zmiany",
-                "Wczytanie pliku zastąpi niezapisany tekst. Kontynuować?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if decision != QMessageBox.Yes:
-                return False
+        if key in self._dirty_editors and not self._autosave(key):
+            return False
 
         path = Path(self.fields[key].text().strip())
         try:
@@ -1583,7 +1796,7 @@ class MainWindow(QMainWindow):
 
         self._dirty_editors.discard(key)
         self._remember_path(key)
-        self.editor_status[key].setText(f"Zapisano: {path.name}")
+        self.editor_status[key].setText(f"Zapisano automatycznie: {path.name} ({time.strftime('%H:%M:%S')})")
         self.editor_status[key].setToolTip(str(path))
         if show_confirmation:
             self.status.setText(f"Zapisano plik: {path.name}")
@@ -1600,7 +1813,7 @@ class MainWindow(QMainWindow):
         for key, _ in self.EDITORS:
             if key in self.SUBTITLE_PATH_KEYS and not self.subtitles_check.isChecked():
                 continue
-            if key in self._dirty_editors and not self._save_file(key):
+            if not self._autosave(key):
                 self.tabs.setCurrentWidget(self._tab_for_editor(key))
                 return False
         return True
@@ -1616,6 +1829,9 @@ class MainWindow(QMainWindow):
             dodaj_napisy=self.subtitles_check.isChecked(),
             tryb_wynikow=self._selected_results_mode(),
             add_video_texts=self.video_texts_check.isChecked(),
+            add_music=self.music_check.isChecked(),
+            trim_only=self.mode_trim_only.isChecked(),
+            overwrite_existing=self.overwrite_check.isChecked(),
         )
 
     def _start(self):
@@ -1634,15 +1850,17 @@ class MainWindow(QMainWindow):
         config = self._get_config()
         for key, label, kind in self.PATHS:
             path = getattr(config, key)
-            if key in self.SUBTITLE_PATH_KEYS and not config.dodaj_napisy:
+            if key in self.SUBTITLE_PATH_KEYS and (not config.dodaj_napisy or config.trim_only):
                 continue
-            if key == "plik_z_tekstami" and not config.add_video_texts:
+            if key == "plik_z_tekstami" and (not config.add_video_texts or config.trim_only):
+                continue
+            if key == "folder_muzyki" and (not config.add_music or config.trim_only):
                 continue
             if kind == "dir" and not path.is_dir():
-                QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: folder nie istnieje.\n{path}")
+                self._show_path_error(key, f"{label}: ten folder nie istnieje.")
                 return
             if kind == "file" and not path.is_file():
-                QMessageBox.warning(self, "Nieprawidłowa ścieżka", f"{label}: plik nie istnieje.\n{path}")
+                self._show_path_error(key, f"{label}: ten plik nie istnieje.")
                 return
 
         try:
@@ -1651,18 +1869,21 @@ class MainWindow(QMainWindow):
                 if file.suffix.lower() in {".mp4", ".mov"} and "TEMP_MPY_" not in file.name.upper()
             ]
         except OSError as error:
-            QMessageBox.warning(self, "Błąd folderu", f"Nie można odczytać nagrań:\n{error}")
+            self._show_path_error("folder_wejsciowy", f"Nie można odczytać nagrań: {error}")
             return
         if not videos:
-            QMessageBox.warning(self, "Brak nagrań", "Folder źródłowy nie zawiera filmów MP4 ani MOV.")
+            self._show_path_error("folder_wejsciowy", "W tym folderze nie ma filmów MP4 ani MOV.")
             return
 
         for key, _, _ in self.PATHS:
             self.settings.setValue(key, str(getattr(config, key)))
         self.log_view.clear()
         self.status.setText("Przygotowywanie montażu…")
-        self.progress_bar.setRange(0, len(videos))
+        self.status_detail.setText(f"Nagrania w folderze: {len(videos)}")
+        self.progress_bar.setRange(0, PROGRESS_STEPS)
         self.progress_bar.setValue(0)
+        self._current_video = (0, len(videos), "")
+        self._render_origin = None
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.job_complete = False
@@ -1674,6 +1895,7 @@ class MainWindow(QMainWindow):
         self.worker_thread.started.connect(self.worker.run)
         self.worker.log.connect(self._append_log)
         self.worker.progress.connect(self._update_progress)
+        self.worker.render_progress.connect(self._update_render_progress)
         self.worker.completed.connect(self._finish)
         self.worker.completed.connect(self.worker_thread.quit)
         self.worker.completed.connect(self.worker.deleteLater)
@@ -1686,22 +1908,69 @@ class MainWindow(QMainWindow):
             return
         self.cancel_event.set()
         self.cancel_button.setEnabled(False)
-        self.status.setText("Przerywanie generowania…")
+        self.status.setText("Przerywanie…")
+        self.status_detail.setText("Bieżący etap zostanie bezpiecznie zatrzymany.")
         self._append_log("Żądanie przerwania wysłane. Trwa bezpieczne zatrzymywanie bieżącego etapu.")
 
     def _append_log(self, text: str):
         self.log_view.appendPlainText(text)
 
+    def _set_overall_progress(self, done_fraction: float):
+        self.progress_bar.setValue(int(max(0.0, min(1.0, done_fraction)) * PROGRESS_STEPS))
+
     def _update_progress(self, index: int, total: int, name: str, status: str):
-        self.progress_bar.setRange(0, total)
-        self.progress_bar.setValue(index)
         labels = {
             "done": "gotowe",
             "error": "błąd",
             "skipped": "pominięto",
+            "exists": "już gotowe, pominięto",
             "cancelled": "przerwano",
         }
-        self.status.setText(f"{index}/{total}: {name} — {labels.get(status, status)}")
+        if status == "started":
+            self._current_video = (index, total, name)
+            self._render_origin = None
+            self._set_overall_progress((index - 1) / total)
+            self.status.setText(f"Film {index} z {total}: {name}")
+            self.status_detail.setText("Analiza dźwięku i przycinanie…")
+            return
+        self._set_overall_progress(index / total)
+        self.status.setText(f"Film {index} z {total}: {name}")
+        self.status_detail.setText(labels.get(status, status).capitalize())
+        if status == "error":
+            self.log_toggle.setChecked(True)
+
+    def _update_render_progress(self, fraction: float):
+        index, total, _name = self._current_video
+        if not total:
+            return
+        self._set_overall_progress((index - 1 + fraction) / total)
+        now = time.monotonic()
+        if self._render_origin is None:
+            self._render_origin = (now, fraction)
+        started_at, start_fraction = self._render_origin
+        text = f"Renderowanie: {fraction * 100:.0f}%"
+        if fraction - start_fraction > 0.03:
+            remaining = (now - started_at) / (fraction - start_fraction) * (1 - fraction)
+            text += f" · zostało ok. {format_duration(remaining)}"
+        self.status_detail.setText(text)
+
+    def _notify(self, title: str, message: str):
+        """Powiadomienie systemowe po długiej pracy, gdy okno nie jest na wierzchu."""
+        QApplication.alert(self)
+        if self.isActiveWindow() or not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        if self.tray_icon is None:
+            self.tray_icon = QSystemTrayIcon(icon("film", self.colors["accent"]), self)
+            self.tray_icon.setToolTip("IPSC Video Automato")
+            self.tray_icon.messageClicked.connect(self._bring_to_front)
+        self.tray_icon.show()
+        self.tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 10000)
+        QTimer.singleShot(15000, self.tray_icon.hide)
+
+    def _bring_to_front(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def _finish(self, success: bool, message: str):
         self.job_complete = True
@@ -1712,10 +1981,15 @@ class MainWindow(QMainWindow):
         self.status.setText(message)
         if success:
             self.progress_bar.setValue(self.progress_bar.maximum())
-        if not success and "przerwano" not in message.lower():
-            QMessageBox.warning(self, "Montaż zakończony z błędem", message)
-        elif not success:
-            self.log_view.append(message)
+            self.status_detail.setText("Sprawdź filmy w folderze Gotowe, a potem opublikuj je w zakładce YouTube lub Buffer.")
+            self._notify("Montaż zakończony", message)
+        elif "przerwano" in message.lower():
+            self.status_detail.setText("Wcześniej gotowe filmy zostały zachowane.")
+            self.log_view.appendPlainText(message)
+        else:
+            self.status_detail.setText("Szczegóły są w dzienniku poniżej.")
+            self.log_toggle.setChecked(True)
+            self._notify("Montaż zakończony z błędami", message)
 
     def _cleanup_thread(self):
         self.worker = None
@@ -1765,7 +2039,10 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("IPSC Video Automato")
+    # Fusion wygląda i zachowuje się tak samo na Windows i macOS, a motyw nadaje mu kolory.
+    app.setStyle("Fusion")
     window = MainWindow()
+    app.setWindowIcon(icon("film", window.colors["accent"]))
     window.show()
     QTimer.singleShot(300, window._test_on_startup)
     sys.exit(app.exec())

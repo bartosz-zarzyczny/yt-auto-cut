@@ -1,12 +1,8 @@
 """Ustawienia projektu zapisywane w settings.json (bez ciężkich importów)."""
 import json
-import os
-import platform
-import shutil
 from pathlib import Path
 
 SETTINGS_FILE = Path(__file__).resolve().parent / "settings.json"
-KEY_IMAGEMAGICK = "imagemagick_path"
 KEY_BUFFER_API = "BUFFER_API"
 KEY_CLOUDFLARE_ENDPOINT = "CLOUDFLARE_API"
 KEY_CLOUDFLARE_ACCESS_KEY_ID = "CLOUDFLARE_ACCESS_KEY_ID"
@@ -18,12 +14,11 @@ CLOUDFLARE_KEYS = (
     KEY_CLOUDFLARE_SECRET_ACCESS_KEY,
     KEY_CLOUDFLARE_PUBLIC_URL,
 )
-IMAGEMAGICK_DEFAULT_WINDOWS = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 
 
 def _default_settings():
-    default = IMAGEMAGICK_DEFAULT_WINDOWS if platform.system() == "Windows" else ""
-    return {KEY_IMAGEMAGICK: default}
+    """Puste klucze do uzupełnienia w settings.json (Buffer i Cloudflare są opcjonalne)."""
+    return {KEY_BUFFER_API: "", **{key: "" for key in CLOUDFLARE_KEYS}}
 
 
 def load_settings(file_path=SETTINGS_FILE):
@@ -54,10 +49,6 @@ def ensure_settings_file(file_path=SETTINGS_FILE):
             pass
 
 
-def saved_imagemagick_path(file_path=SETTINGS_FILE):
-    return str(load_settings(file_path).get(KEY_IMAGEMAGICK) or "").strip()
-
-
 def saved_buffer_api_key(file_path=SETTINGS_FILE):
     return str(load_settings(file_path).get(KEY_BUFFER_API) or "").strip()
 
@@ -65,21 +56,3 @@ def saved_buffer_api_key(file_path=SETTINGS_FILE):
 def saved_cloudflare_settings(file_path=SETTINGS_FILE):
     settings = load_settings(file_path)
     return {key: str(settings.get(key) or "").strip() for key in CLOUDFLARE_KEYS}
-
-
-def save_imagemagick_path(path, file_path=SETTINGS_FILE):
-    settings = load_settings(file_path)
-    settings[KEY_IMAGEMAGICK] = str(path).strip()
-    save_settings(settings, file_path)
-
-
-def find_imagemagick(file_path=SETTINGS_FILE):
-    """Ścieżka z settings.json (jeśli plik istnieje), w przeciwnym razie magick/convert z PATH."""
-    saved = saved_imagemagick_path(file_path)
-    if saved and os.path.isfile(saved):
-        return saved
-    for name in ("magick", "convert"):
-        path = shutil.which(name)
-        if path:
-            return path
-    return None

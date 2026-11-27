@@ -39,23 +39,21 @@ class VideoTextTests(unittest.TestCase):
                         video.duration = 20
                         video.resize.return_value = video
                         result_clip = MagicMock()
-                        result_clip.set_position.return_value.set_duration.return_value = sentinel.result
+                        result_clip.set_position.return_value = sentinel.result
                         with patch.object(ipsc_automato, "check_environment", return_value=(True, "codec")), \
-                             patch.object(ipsc_automato, "zastosuj_imagemagick"), \
                              patch.object(ipsc_automato, "czytaj_wyniki_z_pliku", return_value={1: results}), \
                              patch.object(ipsc_automato, "assign_tracks", return_value=[("video.mp4", 1, (100, 100))]), \
                              patch.object(ipsc_automato, "zglos_wykrycie_timera", return_value=[]), \
                              patch.object(ipsc_automato, "VideoFileClip", return_value=video), \
                              patch.object(ipsc_automato, "trim_video", return_value=video), \
-                             patch.object(ipsc_automato, "TextClip", return_value=result_clip), \
+                             patch.object(ipsc_automato, "text_clip", return_value=result_clip), \
                              patch.object(ipsc_automato, "choose_font"), \
                              patch.object(ipsc_automato, "create_text_clips", return_value=[sentinel.text]) as texts, \
                              patch.object(ipsc_automato, "create_logo_clip", return_value=None), \
                              patch.object(ipsc_automato, "CompositeVideoClip") as composite, \
                              patch.object(ipsc_automato, "CancellableProgressLogger"), \
                              patch.object(ipsc_automato.os, "replace"), \
-                             patch.object(ipsc_automato, "generate_title", return_value="title"), \
-                             patch.object(ipsc_automato, "rename_file", return_value=root / "output.mp4"):
+                             patch.object(ipsc_automato, "generate_title", return_value="title"):
                             self.assertTrue(ipsc_automato.uruchom_automatyzacje(konfiguracja=config))
                             layers = [video]
                             if add_results:
@@ -112,10 +110,15 @@ class VideoTextTests(unittest.TestCase):
             window.fields["plik_z_tekstami"].setText(str(root / "missing.txt"))
 
             window._start()
-            self.assertEqual(warning.call_args.args[1], "Nieprawidłowa ścieżka")
+            # Błąd jest pokazywany pod polem, bez okienka.
+            warning.assert_not_called()
+            self.assertIn("plik nie istnieje", window._path_errors["plik_z_tekstami"].text())
+            self.assertFalse(window._path_errors["plik_z_tekstami"].isHidden())
+            self.assertTrue(window.fields["plik_z_tekstami"].property("error"))
             window.video_texts_check.setChecked(False)
             window._start()
-            self.assertEqual(warning.call_args.args[1], "Brak nagrań")
+            self.assertIn("nie ma filmów", window._path_errors["folder_wejsciowy"].text())
+            self.assertFalse(window._path_errors["folder_wejsciowy"].isHidden())
             window.close()
         self.assertIsNotNone(app)
 

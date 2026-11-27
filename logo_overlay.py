@@ -1,4 +1,4 @@
-"""Logo w prawym górnym rogu filmu (maks. 100x100 px, z zachowaniem proporcji)."""
+"""Logo w prawym górnym rogu filmu (maks. LOGO_MAX_SIZE x LOGO_MAX_SIZE px, z zachowaniem proporcji)."""
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -21,7 +21,7 @@ def resolve_logo_path(logo_path) -> Optional[Path]:
 
 
 def _fit_size(width: int, height: int) -> tuple:
-    """Zmniejsza wymiary do maks. 100x100 bez zmiany proporcji (nie powiększa małych logo)."""
+    """Zmniejsza wymiary do maks. LOGO_MAX_SIZE bez zmiany proporcji (nie powiększa małych logo)."""
     scale = min(LOGO_MAX_SIZE / width, LOGO_MAX_SIZE / height, 1.0)
     return max(1, round(width * scale)), max(1, round(height * scale))
 
