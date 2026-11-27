@@ -18,6 +18,11 @@ PERCENTYL_GLOSNOSCI = 90
 MAX_SKOK_HZ = 60
 MIN_KONCENTRACJA_SYGNALU = 0.85
 MAX_ODCHYLENIE_CZESTOTLIWOSCI_HZ = 25
+MAX_PRZERWA_RAMEK = 10        # ok. 0,12 s zagłuszenia tonu innym dźwiękiem nie przerywa sygnału
+MIN_GLOSNOSC_PRZERWY = 0.3    # w przerwie ton musi mieć co najmniej 30% progu głośności
+MIN_AKTYWNYCH_RAMEK = 12      # ok. 0,14 s czystego tonu w całym sygnale
+MIN_KONCENTRACJA_TONU = 0.5   # wyraźny ton, choć cichszy od progu głośności, nadal należy do sygnału
+MAX_ROZBIEG_RAMEK = 20        # do ok. 0,23 s narastania tonu przed pierwszą głośną ramką
 
 
 def _wyciagnij_audio(sciezka_wideo, cancel_event: Optional[Event] = None):
@@ -48,6 +53,19 @@ def _wyciagnij_audio(sciezka_wideo, cancel_event: Optional[Event] = None):
     return np.frombuffer(surowe, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+PEAK_HALF_WIDTH = 2  # liczba binów po każdej stronie piku wliczanych do koncentracji
+
+
+def energy_near_peak(energy, peak_indices):
+    """Suma energii w oknie +-PEAK_HALF_WIDTH binów wokół piku, dla każdej ramki naraz (bez pętli w Pythonie)."""
+    padded = np.pad(energy, ((PEAK_HALF_WIDTH, PEAK_HALF_WIDTH), (0, 0)))
+    columns = np.arange(energy.shape[1])
+    return sum(
+        padded[peak_indices + PEAK_HALF_WIDTH + offset, columns]
+        for offset in range(-PEAK_HALF_WIDTH, PEAK_HALF_WIDTH + 1)
+    )
+
+
 def znajdz_sygnaly_timera(sciezka_wideo, cancel_event: Optional[Event] = None):
     """Zwraca listę (czas_s, częstotliwość_Hz) wykrytych sygnałów timera."""
     if cancel_event and cancel_event.is_set():
@@ -70,30 +88,55 @@ def znajdz_sygnaly_timera(sciezka_wideo, cancel_event: Optional[Event] = None):
 
     energia = (pasmo ** 2)
     calkowita = energia.sum(axis=0) + 1e-12
-    blisko = np.zeros(pasmo.shape[1])
-    for i in range(pasmo.shape[1]):
-        lo, hi = max(idx[i] - 2, 0), idx[i] + 3
-        blisko[i] = energia[lo:hi, i].sum()
+    blisko = energy_near_peak(energia, idx)
     koncentracja = blisko / calkowita
 
     prog = np.percentile(amp, PERCENTYL_GLOSNOSCI)
     aktywne = (koncentracja > MIN_KONCENTRACJA) & (amp > prog)
 
+    return _tone_runs(aktywne, amp, f_pik, koncentracja, prog)
+
+
+def _tone_runs(aktywne, amp, f_pik, koncentracja, prog):
+    """Ciągłe tony timera: (start_s, częstotliwość_Hz).
+
+    Krótki szerokopasmowy dźwięk (krok, szelest, stuknięcie) potrafi na chwilę „zagłuszyć” ton —
+    wtedy koncentracja energii spada, choć najsilniejsza częstotliwość pasma nadal jest ta sama.
+    Takie ramki (do MAX_PRZERWA_RAMEK z rzędu) nie przerywają tonu, ale do jakości sygnału
+    liczą się tylko ramki z czystym tonem."""
     wyniki = []
     i, n = 0, len(aktywne)
+    min_glosnosc_przerwy = prog * MIN_GLOSNOSC_PRZERWY
     while i < n:
         if not aktywne[i]:
             i += 1
             continue
-        j = i
-        while j + 1 < n and aktywne[j + 1] and abs(f_pik[j + 1] - f_pik[j]) <= MAX_SKOK_HZ:
-            j += 1
-        if j - i + 1 >= MIN_RAMEK:
-            czestotliwosci = f_pik[i:j + 1]
-            koncentracje = koncentracja[i:j + 1]
-            if (np.median(koncentracje) >= MIN_KONCENTRACJA_SYGNALU
+        def ton(k, czestotliwosc):
+            """Ramka z tym samym, wyraźnym tonem — także trochę cichszym niż próg głośności."""
+            return (abs(f_pik[k] - czestotliwosc) <= MAX_SKOK_HZ and amp[k] > min_glosnosc_przerwy
+                    and (aktywne[k] or koncentracja[k] >= MIN_KONCENTRACJA_TONU))
+
+        ostatnia, przerwa, k = i, 0, i + 1
+        while k < n:
+            if ton(k, f_pik[ostatnia]):
+                ostatnia, przerwa = k, 0
+            elif (abs(f_pik[k] - f_pik[ostatnia]) <= MAX_SKOK_HZ and amp[k] > min_glosnosc_przerwy
+                    and przerwa < MAX_PRZERWA_RAMEK):
+                przerwa += 1
+            else:
+                break
+            k += 1
+        j = ostatnia
+        # Początek: cofamy się do narastania tonu (pierwsza głośna ramka bywa kilka ramek po starcie).
+        s, cofniecie = i, 0
+        while s > 0 and cofniecie < MAX_ROZBIEG_RAMEK and ton(s - 1, f_pik[i]):
+            s, cofniecie = s - 1, cofniecie + 1
+        czyste = np.flatnonzero(aktywne[s:j + 1]) + s
+        if j - s + 1 >= MIN_RAMEK and len(czyste) >= MIN_AKTYWNYCH_RAMEK:
+            czestotliwosci = f_pik[s:j + 1]
+            if (np.median(koncentracja[czyste]) >= MIN_KONCENTRACJA_SYGNALU
                     and np.std(czestotliwosci) <= MAX_ODCHYLENIE_CZESTOTLIWOSCI_HZ):
-                wyniki.append((i * HOP / SR, float(np.median(czestotliwosci))))
+                wyniki.append((s * HOP / SR, float(np.median(czestotliwosci))))
         i = j + 1
     return wyniki
 

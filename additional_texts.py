@@ -1,8 +1,11 @@
 import re
 import os
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
-from moviepy.editor import TextClip
+from PIL import Image
+
+from ffmpeg_render import POSITION_CENTER, Overlay
+from text_render import render_text
 
 MAX_TEXTS = 5
 MIN_TEXT_DURATION = 5.0     # s
@@ -14,6 +17,7 @@ FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Fonts", "m
 COLOR = "#00F0FF"           # neonowy cyjan
 OUTLINE_COLOR = "#1A0536"
 WIDTH = 960
+TOP_POSITION = 0.07            # górna krawędź tekstu jako ułamek wysokości filmu
 
 
 def read_texts(path):
@@ -42,10 +46,10 @@ def plan_timings(text_count, video_length):
     return [(START_OFFSET + i * slot + margin, duration) for i in range(n)]
 
 
-def create_text_clips(
-    path, video_length, log_callback: Optional[Callable[[str], None]] = None
-):
-    """Zwraca listę TextClip do nałożenia w górnej części wideo."""
+def plan_text_overlays(
+    path, video_length, video_height: int, log_callback: Optional[Callable[[str], None]] = None
+) -> List[Overlay]:
+    """Nakładki z tekstami w górnej części filmu, rozłożone w czasie (z płynnym pojawianiem się)."""
     def report(text):
         print(text)
         if log_callback:
@@ -55,14 +59,10 @@ def create_text_clips(
     plan = plan_timings(len(texts), video_length)
     if len(plan) < len(texts):
         report(f"[TEKSTY] Film za krótki - użyto {len(plan)} z {len(texts)} tekstów.")
-    clips = []
+    overlays = []
     for text, (start, duration) in zip(texts, plan):
-        clip = TextClip(text, fontsize=60, color=COLOR, font=FONT_PATH,
-                        stroke_color=OUTLINE_COLOR, stroke_width=2, method="caption",
-                        size=(WIDTH, None), align="center")
-        clip = (clip.set_start(start).set_duration(duration)
-                .set_position(("center", 0.07), relative=True)
-                .crossfadein(0.4).crossfadeout(0.4))
-        clips.append(clip)
+        image = Image.fromarray(render_text(text, FONT_PATH, 60, COLOR, OUTLINE_COLOR, 2, max_width=WIDTH))
+        overlays.append(Overlay(image, POSITION_CENTER, int(TOP_POSITION * video_height),
+                                start, start + duration, fade=True))
         report(f"[TEKSTY] \"{text}\": {start:.1f}s - {start + duration:.1f}s")
-    return clips
+    return overlays

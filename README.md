@@ -1,6 +1,6 @@
 # Automatyzacja Montażu Wideo IPSC 🔫🎬
 
-Ten skrypt w Pythonie automatyzuje proces montażu nagrań wideo z zawodów IPSC. Przetwarza pliki wideo w całej ich długości (bez przycinania), zapętla i podkłada muzykę z efektem fade-out, zmienia format na pionowy 1080x1920 i dodaje planszę z Twoimi wynikami (czas, miejsce, punkty, Hit Factor).
+Ten program w Pythonie automatyzuje montaż nagrań wideo z zawodów IPSC — w aplikacji okienkowej (Windows i macOS) albo z terminala. Sam znajduje w dźwięku sygnał timera i przycina każde nagranie do przebiegu (start timera i czas z wyników), podkłada zapętloną muzykę z efektem fade-out, zmienia format na pionowy 1080×1920 lub poziomy 1920×1080 i dodaje planszę z Twoimi wynikami (czas, a gdy są w wynikach — miejsce, punkty i Hit Factor), teksty wideo i logo. Tryb **Tylko przycięcie** szybko przycina nagrania bez żadnych dodatków. Gotowe filmy możesz najpierw obejrzeć, a potem opublikować na YouTube lub przez Buffer — montaż nigdy nie publikuje niczego sam.
 
 Jeśli komputer ma obsługiwaną kartę graficzną (NVIDIA, AMD lub Intel), renderowanie korzysta ze sprzętowego kodera i jest bardzo szybkie. Bez niej montaż nadal działa, ale na procesorze (wolniej).
 
@@ -9,9 +9,7 @@ Jeśli komputer ma obsługiwaną kartę graficzną (NVIDIA, AMD lub Intel), rend
 Aby skrypt działał poprawnie, musisz zainstalować w systemie Windows następujące elementy:
 
 1. **Python (3.8 lub nowszy):** Pamiętaj, aby podczas instalacji zaznaczyć pole _„Add Python to PATH”_.
-2. **ImageMagick (Niezbędny do napisów!):**
-   - Pobierz wersję dla Windows ze strony: [imagemagick.org](https://imagemagick.org/script/download.php#windows) (najlepiej pierwszą pozycję `.exe`, np. `ImageMagick-7.1.x-Q16-HDRI-x64-dll.exe`).
-   - **BARDZO WAŻNE:** Podczas instalacji musisz zaznaczyć pole **"Install legacy utilities (e.g. convert)"**.
+2. **Napisy nie wymagają dodatkowych programów** — wyniki i teksty wideo rysuje biblioteka Pillow (instalowana z `requirements.txt`). ImageMagick nie jest już potrzebny.
 3. _(Opcjonalnie)_ **Karta graficzna z kodowaniem sprzętowym H.264** dla szybszego renderowania — **NVIDIA** (`h264_nvenc`, np. RTX 4060), **AMD** (`h264_amf`) lub grafika **Intel** (`h264_qsv`). Karta nie jest wymagana: bez niej aplikacja automatycznie użyje `libx264` (procesor), co jest wolniejsze, ale działa na każdym komputerze. Do kodowania sprzętowego potrzebne są aktualne sterowniki oraz pełna wersja FFmpeg (np. z [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)).
 
 ## 🍎 Konfiguracja pod macOS
@@ -19,9 +17,9 @@ Aby skrypt działał poprawnie, musisz zainstalować w systemie Windows następu
 Projekt działa na macOS (kodek `h264_videotoolbox` lub `libx264`; NVIDIA nie jest potrzebna). Poniższe komendy wykonaj w Terminalu.
 
 1. **Homebrew** (jeśli go nie masz) — instrukcja na [brew.sh](https://brew.sh/).
-2. **Python, ImageMagick i FFmpeg:**
+2. **Python i FFmpeg:**
    ```bash
-   brew install python imagemagick ffmpeg
+   brew install python ffmpeg
    ```
 3. **Środowisko wirtualne i biblioteki** (w folderze projektu):
    ```bash
@@ -38,7 +36,7 @@ Projekt działa na macOS (kodek `h264_videotoolbox` lub `libx264`; NVIDIA nie je
    Opcja `/yt` działa tak samo, ale w zsh/bash lepiej używać `--yt` (ukośnik na początku bywa traktowany jak ścieżka).
 5. **YouTube:** konfiguracja OAuth jest identyczna jak na Windows (sekcja „Publikowanie Shorts na YouTube”). Plik `youtube_client_secret.json` zapisz w folderze projektu; logowanie otworzy się w domyślnej przeglądarce.
 
-Uwagi: napisy z wynikami używają systemowego Arial Bold lub Helvetica; jeśli ImageMagick nie jest wykrywany, sprawdź `which magick` (na Apple Silicon Homebrew instaluje w `/opt/homebrew/bin`). Brak uprawnień do folderów rozwiąż w **Ustawienia systemowe → Prywatność i ochrona**.
+Uwagi: plansza wyników używa systemowej czcionki Arial Bold (jest w macOS), a gdy jej brak — czcionki dołączonej do projektu. Brak uprawnień do folderów rozwiąż w **Ustawienia systemowe → Prywatność i ochrona**.
 
 ## 📦 Instalacja bibliotek Pythona
 
@@ -60,60 +58,56 @@ Po zainstalowaniu zależności uruchom aplikację poleceniem:
 python desktop_app.py
 ```
 
-Interfejs w ciemnym motywie jest podzielony na sześć zakładek (w tej kolejności):
+Interfejs ma motyw **jasny**, **ciemny** albo **jak w systemie** (domyślnie; przełącza się razem z Windows/macOS — wybór w **Ustawienia → Wygląd**). Używa czcionek systemu i własnych ikon, więc wygląda tak samo na Windows i macOS. Po lewej jest pasek z krokami pracy; przy każdym kroku pojawia się ✓ (gotowe) albo ⚠ (coś do poprawy — opis po najechaniu myszką):
 
-| Zakładka         | Zawartość                                                                                                                                                                                                                                                                                                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Główna**       | Checkbox **Czy dodać wyniki** (domyślnie odznaczony; dotyczy wyłącznie planszy z wynikami na dole filmu), wybór folderów **Nagrania źródłowe** i **Gotowe filmy**, przyciski **Rozpocznij montaż** / **Przerwij generowanie**, pasek postępu i dziennik pracy oraz skróty z ikonami do profili autora na dole zakładki |
-| **Zawody**       | Wybór **Wideo Pionowe / Poziome** oraz edytory plików **Mapowanie torów** (`mapowanie_torow.txt`) i **Wyniki zawodów** (`wyniki.txt`)                                                                                                                                                                                                                                                             |
-| **Konfiguracja** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 100×100 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), ścieżka do programu **ImageMagick** (zapis w `settings.json`), checkbox **Czy dodać teksty wideo** oraz edytory plików **Teksty wideo** (`teksty_wideo.txt`) i **Opis zawodów** (`opis_zawodow.txt`) |
-| **YouTube**      | Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania                                                                                                                                                                                 |
-| **Buffer**       | Checkboxy platform **Facebook**, **Instagram**, **X/Twitter** (dla Facebooka i Instagrama lista typu posta: **reel**, **post**, **story**, domyślnie **reel**), osobne pola **Opis na Facebook**, **Opis na Instagram** (licznik hashtagów, limit 5) i **Opis na X/Twitter** (licznik znaków, limit 280), edytor **Lista filmów Buffer** (`buffer.txt`) z przyciskami **Wczytaj z pliku** / **Zapisz do pliku** oraz wyborem pliku (ścieżka jest zapamiętywana), sekcja **PLANOWANIE SZKICÓW** (te same dni i godziny co w YouTube) i przycisk **Utwórz szkice w Buffer** — tworzy wyłącznie szkice (bez publikacji) w pierwszych wolnych terminach. Każdy adres z listy (np. publiczny link Cloudflare R2) jest dołączany do posta jako plik wideo (Buffer pobiera go z tego adresu), a treść posta to sam opis, bez linku. Wysłane pary platforma + film są pomijane (rejestr `buffer_upload_state.json`). Przycisk **Wyślij do CloudFlare** pod edytorem: wysyła pliki MP4 z wybranego folderu (domyślnie **Gotowe**, zmiana przyciskiem **Przeglądaj…**) do bucketa Cloudflare R2 i na bieżąco dopisuje ich publiczne linki do `buffer.txt` (pliki o już istniejącej nazwie w buckecie nie są wysyłane ponownie) || **Pomoc**        | Przycisk **Test Systemu** oraz ten plik README z formatowaniem                                                                                                                                                                                                                                                                                                                                    |
+| Krok | Zawartość |
+| ---- | --------- |
+| **1. Zawody** | Foldery **Nagrania źródłowe** i **Gotowe filmy** oraz formularz **Opis zawodów**: nazwa, data (kalendarz), miejsce, typ i poziom, z podglądem tytułu i nazwy pliku. Pola formularza są zapisywane na początku `opis_zawodow.txt`, a reszta tekstu (np. wklejony opis z Practiscore) zostaje bez zmian. **Pokaż pełny tekst opisu** odsłania cały plik do ręcznej edycji |
+| **2. Wyniki** | Edytor wyników (`wyniki.txt`) z wyborem formatu **Practiscore / ECM / Trening** i tabelą **Odczytane wyniki** aktualizowaną na bieżąco. Jeśli wklejony tekst pasuje do innego formatu niż wybrany, format przełącza się sam |
+| **3. Montaż** | **Rodzaj montażu** (pełny / tylko przycięcie, wyniki, muzyka, nadpisywanie, domyślna orientacja), tabela **Plan montażu**: plik → tor → H/V → czas → start timera → co się stanie (montaż, brak wyniku, film już istnieje). Numer toru zmienisz dwukrotnym kliknięciem albo przyciskami **W górę / W dół**, orientację listą w wierszu — zmiany zapisują się do `mapowanie_torow.txt`. **Wykryj start timera** analizuje dźwięk nagrań i pokazuje, od której sekundy zacznie się film (albo że timera nie wykryto); montaż korzysta potem z tych wyników i nie analizuje dźwięku drugi raz. Dalej przycisk **Rozpocznij montaż (N)**, postęp z czasem do końca i dziennik |
+| **4. Publikacja** | Dwie karty. **YouTube:** Sekcja **PUBLIKACJA** (własne dni tygodnia i godziny albo „Publikuj wszystkie od razu”), wybór folderu z filmami, przyciski **Wyślij do YT** / **Przerwij wysyłanie**, opcja „Tylko podgląd” i dziennik wysyłania **Buffer i Cloudflare:** Checkboxy platform **Facebook**, **Instagram**, **X/Twitter** (dla Facebooka i Instagrama lista typu posta: **reel**, **post**, **story**, domyślnie **reel**), osobne pola **Opis na Facebook**, **Opis na Instagram** (licznik hashtagów, limit 5) i **Opis na X/Twitter** (licznik znaków, limit 280), edytor **Lista filmów Buffer** (`buffer.txt`) z przyciskami **Wczytaj z pliku** / **Zapisz do pliku** oraz wyborem pliku (ścieżka jest zapamiętywana), sekcja **PLANOWANIE SZKICÓW** (własne dni i godziny) i przycisk **Utwórz szkice w Buffer** — tworzy wyłącznie szkice (bez publikacji) w pierwszych wolnych terminach. Każdy adres z listy (np. publiczny link Cloudflare R2) jest dołączany do posta jako plik wideo (Buffer pobiera go z tego adresu), a treść posta to sam opis, bez linku. Wysłane pary platforma + film są pomijane (rejestr `buffer_upload_state.json`). Przycisk **Wyślij do CloudFlare** pod edytorem: wysyła pliki MP4 z wybranego folderu (domyślnie **Gotowe**, zmiana przyciskiem **Przeglądaj…**) do bucketa Cloudflare R2 i na bieżąco dopisuje ich publiczne linki do `buffer.txt` (pliki o już istniejącej nazwie w buckecie nie są wysyłane ponownie) |
+| **Ustawienia** | Folder z muzyką, opcjonalne **Logo** (plik PNG/JPG/BMP/GIF/WEBP — pojawia się w prawym górnym rogu filmu, automatycznie zmniejszane do maks. 200×200 px z zachowaniem proporcji; puste pole = bez logo; moduł `logo_overlay.py`), checkbox **Czy dodać teksty wideo** oraz edytor pliku **Teksty wideo** (`teksty_wideo.txt`), edytor **Mapowanie torów (zaawansowane)** (`mapowanie_torow.txt`, zmienia się sam przy edycji tabeli planu), sekcja **Klucze usług** (Buffer API i Cloudflare R2 — zapis w `settings.json`) oraz **Wygląd** (motyw) |
+| **Pomoc** | Przycisk **Test systemu**, ten plik README z formatowaniem i linki do profili autora |
 
 **Zapamiętywanie ścieżek.** Wszystkie wybrane foldery i pliki są zapisywane lokalnie dla bieżącego użytkownika (`QSettings`) i przywracane po ponownym uruchomieniu aplikacji.
 
-Zakładka **Konfiguracja** przewija się pionowo, gdy jej zawartość nie mieści się w oknie; status pliku i przyciski edytora mają osobne wiersze, więc nie nachodzą na pole tekstowe.
+Strony kroków przewijają się pionowo, gdy ich zawartość nie mieści się w oknie.
 
-**Edytory plików TXT.** Pod każdym edytorem jest pole ze ścieżką, przycisk **Przeglądaj…** oraz **Wczytaj z pliku** i **Zapisz do pliku** (kodowanie UTF-8). Zawartość plików wczytuje się automatycznie przy starcie, a po wskazaniu innego pliku od razu. Aplikacja ostrzega przed utratą niezapisanych zmian, a przy starcie montażu sama zapisuje zmienione edytory.
+**Edytory plików TXT.** Pod każdym edytorem jest pole ze ścieżką, przycisk **Przeglądaj…** i **Wczytaj ponownie** (kodowanie UTF-8). Zmiany zapisują się same chwilę po zakończeniu pisania (status pod edytorem pokazuje godzinę zapisu), więc nie ma pytań o niezapisane zmiany. Zawartość plików wczytuje się automatycznie przy starcie, a po wskazaniu innego pliku od razu.
 
-Montaż działa w tle; postęp i komunikaty są widoczne w oknie. Podczas montażu można użyć przycisku **Przerwij generowanie** — bieżący etap zostanie bezpiecznie zatrzymany, niedokończony plik tymczasowy usunięty, a wcześniej gotowe filmy pozostaną bez zmian. **Wysyłanie na YouTube z aplikacji.** Zakładka **YouTube** domyślnie używa folderu **Gotowe filmy** (pole jest wtedy wyszarzone i podąża za zakładką Główna). Odznacz „Taki sam jak Gotowe filmy”, aby wskazać inny folder z plikami MP4 — wybór jest zapamiętywany. **Wyślij do YT** prosi o potwierdzenie i wysyła filmy jako prywatne z zaplanowaną publikacją (lub od razu publiczne, jeśli wybierzesz „Publikuj wszystkie od razu” w sekcji **PUBLIKACJA**) (wymaga skonfigurowanego klucza — patrz sekcja o YouTube API); „Tylko podgląd” pokazuje wyłącznie tytuły i terminy. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku (nie da się przerwać okna logowania Google w przeglądarce). Już wysłane filmy są pomijane. To samo można zrobić z konsoli (`python youtube_upload.py`).
+**Błędy i powiadomienia.** Nieprawidłowa ścieżka jest podświetlana na czerwono z opisem pod polem (aplikacja sama przechodzi do właściwej zakładki), zamiast wyskakującego okienka. Po zakończeniu montażu, gdy okno nie jest na wierzchu, pojawia się powiadomienie systemowe. Gdy coś pójdzie nie tak, dziennik rozwija się sam.
+
+**Skróty klawiszowe.** **Ctrl+Enter** (na Macu **⌘+Enter**) — rozpocznij montaż; **Ctrl+S** (**⌘+S**) — zapisz od razu wszystkie edytory. Autor i linki do jego profili są na dole kroku **Pomoc**.
+
+Montaż działa w tle; postęp i komunikaty są widoczne w oknie. Podczas montażu można użyć przycisku **Przerwij** — bieżący etap zostanie bezpiecznie zatrzymany, niedokończony plik tymczasowy usunięty, a wcześniej gotowe filmy pozostaną bez zmian. **Wysyłanie na YouTube z aplikacji.** Zakładka **YouTube** domyślnie używa folderu **Gotowe filmy** (pole jest wtedy wyszarzone i podąża za zakładką Główna). Odznacz „Taki sam jak Gotowe filmy”, aby wskazać inny folder z plikami MP4 — wybór jest zapamiętywany. **Wyślij do YT** prosi o potwierdzenie i wysyła filmy jako prywatne z zaplanowaną publikacją (lub od razu publiczne, jeśli wybierzesz „Publikuj wszystkie od razu” w sekcji **PUBLIKACJA**) (wymaga skonfigurowanego klucza — patrz sekcja o YouTube API); „Tylko podgląd” pokazuje wyłącznie tytuły i terminy. **Przerwij wysyłanie** zatrzymuje wysyłkę po bieżącym fragmencie pliku (nie da się przerwać okna logowania Google w przeglądarce). Już wysłane filmy są pomijane. To samo można zrobić z konsoli (`python youtube_upload.py`).
 
 ### 🩺 Test Systemu
 
-Przy każdym uruchomieniu aplikacja w tle sprawdza środowisko (moduł `system_check.py`). Gdy wszystko jest w porządku, zostajesz na zakładce **Główna**. Gdy czegoś brakuje, aplikacja przechodzi do zakładki **Pomoc** i pokazuje raport. To samo możesz wywołać w każdej chwili przyciskiem **Test Systemu**.
+Przy każdym uruchomieniu aplikacja w tle sprawdza środowisko (moduł `system_check.py`). Gdy wszystko jest w porządku, zostajesz na kroku **1. Zawody**. Gdy czegoś brakuje, aplikacja przechodzi do kroku **Pomoc** i pokazuje raport. To samo możesz wywołać w każdej chwili przyciskiem **Test Systemu**.
 
 Raport pokazuje wersje i status (✔ / ✘) dla:
 
 - **Python** (wymagany 3.8+),
-- **bibliotek:** `moviepy<2.0.0`, `decorator==4.4.2`, `numpy`, `librosa`, `scipy`, `Pillow`, `PySide6>=6.5,<7`, bibliotek Google i `tzdata` — nie tylko ich obecność, ale też możliwość zaimportowania,
-- **FFmpeg** (wersja i ścieżka), kodeku **libx264** oraz opcjonalnych kodeków sprzętowych (`h264_nvenc`, `h264_amf`, `h264_qsv` / `h264_videotoolbox`) — każdy jest sprawdzany próbnym kodowaniem, więc raport pokazuje tylko te, które naprawdę działają,
-- **ImageMagick** (wersja i ścieżka).
+- **bibliotek:** `moviepy<2.0.0`, `decorator==4.4.2`, `numpy`, `scipy`, `Pillow`, `PySide6>=6.5,<7`, bibliotek Google, `tzdata` i `boto3` — nie tylko ich obecność, ale też możliwość zaimportowania,
+- **FFmpeg** (wersja i ścieżka), kodeku **libx264** oraz opcjonalnych kodeków sprzętowych (`h264_nvenc`, `h264_amf`, `h264_qsv` / `h264_videotoolbox`) — każdy jest sprawdzany próbnym kodowaniem, więc raport pokazuje tylko te, które naprawdę działają.
 
 Pod listą pojawia się sekcja **Do doinstalowania / naprawy** z gotowym poleceniem (np. `python -m pip install "moviepy<2.0.0"`) lub instrukcją instalacji programu dla Twojego systemu. Brak kodeku sprzętowego nie jest błędem — montaż użyje wtedy wolniejszego `libx264`.
 
-Aplikacja uruchomi się nawet wtedy, gdy brakuje moviepy, FFmpeg lub ImageMagick, żeby pokazać, co trzeba doinstalować (przycisk montażu jest wtedy zablokowany do czasu naprawy). Jeśli brakuje samego PySide6, nie da się otworzyć okna głównego — raport pojawi się wtedy w prostym oknie awaryjnym (lub w konsoli) z poleceniem instalacji.
+Aplikacja uruchomi się nawet wtedy, gdy brakuje moviepy lub FFmpeg, żeby pokazać, co trzeba doinstalować (przycisk montażu jest wtedy zablokowany do czasu naprawy). Jeśli brakuje samego PySide6, nie da się otworzyć okna głównego — raport pojawi się wtedy w prostym oknie awaryjnym (lub w konsoli) z poleceniem instalacji.
 
-Aplikacja korzysta z tych samych wymagań systemowych co montaż konsolowy: FFmpeg oraz ImageMagick. Na macOS zainstaluj je poleceniem `brew install imagemagick ffmpeg`. Do dystrybucji potrzebne będą osobne buildy Windows i macOS.
+Aplikacja korzysta z tych samych wymagań systemowych co montaż konsolowy: wystarczy FFmpeg (na macOS `brew install ffmpeg`). Do dystrybucji potrzebne będą osobne buildy Windows i macOS.
 
 ## ⚙️ Konfiguracja Skryptu
 
 Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub dowolnym edytorze kodu i dostosuj następujące ustawienia na samej górze pliku:
 
-1. **ImageMagick:**
-   Ścieżka do `magick.exe` jest zapisana w pliku **`settings.json`** (klucz `imagemagick_path`) w katalogu projektu — plik powstaje automatycznie przy pierwszym uruchomieniu (na Windows z dotychczasową ścieżką domyślną `C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe`) i jest lokalny dla komputera (ignorowany przez Git). Jeśli masz inną wersję lub folder, zmień wartość w pliku albo w aplikacji desktopowej: zakładka **Konfiguracja → ImageMagick (napisy) → Przeglądaj…**. Gdy ścieżka jest pusta lub wskazuje nieistniejący plik, skrypt szuka `magick`/`convert` w `PATH`. Zmiana działa od następnego montażu.
-
-   ```json
-   {
-     "imagemagick_path": "C:\\Program Files\\ImageMagick-7.1.2-Q16-HDRI\\magick.exe"
-   }
-   ```
+1. **Plik `settings.json`:** powstaje automatycznie przy pierwszym uruchomieniu w katalogu projektu, z pustymi kluczami Buffer i Cloudflare do uzupełnienia. Jest lokalny dla komputera (ignorowany przez Git). Dawny klucz `imagemagick_path` nie jest już używany i można go usunąć.
 
 2. **Klucz Buffer API (zakładka Buffer):**
-   Token do Buffer API wpisz w pliku **`settings.json`** w katalogu projektu, pod kluczem `BUFFER_API`. Plik jest lokalny dla komputera (ignorowany przez Git), a wartości nie ma w interfejsie aplikacji, więc edytuj go w notatniku lub dowolnym edytorze. Informacje o uzyskaniu tokenu znajdziesz w dokumentacji Buffer API: https://developers.buffer.com/. Bez tego wpisu zakładka Buffer nie utworzy szkiców.
+   Token do Buffer API wpisz w pliku **`settings.json`** w katalogu projektu, pod kluczem `BUFFER_API`. Plik jest lokalny dla komputera (ignorowany przez Git). Token możesz wpisać w aplikacji (**Konfiguracja → Klucze usług**) albo w notatniku. Informacje o uzyskaniu tokenu znajdziesz w dokumentacji Buffer API: https://developers.buffer.com/. Bez tego wpisu Buffer nie utworzy szkiców.
 
    ```json
    {
-     "imagemagick_path": "C:\\Program Files\\ImageMagick-7.1.2-Q16-HDRI\\magick.exe",
      "BUFFER_API": "TWOJ_TOKEN_BUFFER"
    }
    ```
@@ -144,12 +138,12 @@ Przed pierwszym uruchomieniem otwórz plik `ipsc_automato.py` w notatniku lub do
 
    Możesz je podmienić na dowolne własne ścieżki.
 
-   **Czcionka i kodek (automatycznie, `system_settings.py`):** Napisy z wynikami używają czcionki systemowej (Windows: `Arial-Bold`; pozostałe systemy: Arial Bold/Helvetica lub Liberation Sans/DejaVu Sans Bold, z czcionkami z folderu `Fonts` jako zapasowymi). Dodatkowe teksty u góry używają Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`. Kodek wybierany jest automatycznie, na podstawie próbnego kodowania, w tej kolejności: `h264_nvenc` (NVIDIA), `h264_amf` (AMD), `h264_qsv` (Intel Quick Sync), na macOS `h264_videotoolbox`, a w ostateczności `libx264` (procesor; wolniejszy, ale działa wszędzie). Preset jest dobierany do kodeka (`fast`; dla AMD `speed`). Kodeki AMD (`h264_amf`) i Intel (`h264_qsv`) nie zostały jeszcze sprawdzone na prawdziwym sprzęcie (autor testował NVENC). Jeśli montaż z którymś z nich zawiedzie, uruchom **Test Systemu** w zakładce Pomoc i zgłoś problem; kodek sprzętowy nie jest wymagany, a aplikacja w razie potrzeby użyje `libx264`. Na macOS/Linuksie zainstaluj ImageMagick (`brew install imagemagick` / `sudo apt install imagemagick`).
+   **Czcionka i kodek (automatycznie, `system_settings.py`):** Napisy rysuje Pillow (`text_render.py`), więc wyglądają tak samo na Windows i macOS. Plansza wyników używa systemowej czcionki Arial Bold (Windows i macOS; na Linuksie Liberation Sans/DejaVu Sans Bold), a gdy jej brak — Chakra Petch z folderu `Fonts`. Dodatkowe teksty u góry używają Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`. Kodek wybierany jest automatycznie, na podstawie próbnego kodowania, w tej kolejności: `h264_nvenc` (NVIDIA), `h264_amf` (AMD), `h264_qsv` (Intel Quick Sync), na macOS `h264_videotoolbox`, a w ostateczności `libx264` (procesor; wolniejszy, ale działa wszędzie). Film jest renderowany jednym poleceniem FFmpeg (`ffmpeg_render.py`): przycięcie, skalowanie, nakładki (plansza wyników, teksty wideo, logo) i zmiksowana muzyka — obraz nie przechodzi przez Pythona, więc montaż jest kilka razy szybszy niż dawniej w MoviePy (na filmie testowym 31 s z napisami, logo i muzyką: 6 s zamiast 55 s). Jakość jest dobierana do kodeka zamiast stałego bitrate: NVIDIA `-cq 21`, Apple VideoToolbox `-q:v 65`, procesor `-crf 20`; AMD i Intel zostają przy 8000k, bo nie były jeszcze testowane na sprzęcie. Kodeki AMD (`h264_amf`) i Intel (`h264_qsv`) nie zostały jeszcze sprawdzone na prawdziwym sprzęcie (autor testował NVENC). Jeśli montaż z którymś z nich zawiedzie, uruchom **Test Systemu** w zakładce Pomoc i zgłoś problem; kodek sprzętowy nie jest wymagany, a aplikacja w razie potrzeby użyje `libx264`.
 
 3a. **Kolejność torów i orientacja filmu (`mapowanie_torow.txt`):**
 Obsługują to moduły `track_mapping.py` i `track_order.py`. Pliki z `FOLDER_WEJSCIOWY` są sortowane alfabetycznie, a **N-ta linia** pliku `mapowanie_torow.txt` opisuje **N-ty plik**. Przykład: jeśli plik jest drugi w sortowaniu, a druga linia w `mapowanie_torow.txt` to `1`, to jest to Tor 1 (i do niego zostaną dopasowane wyniki ze `wyniki.txt`).
 
-**Orientacja wszystkich filmów:** w aplikacji, w zakładce **Zawody** nad edytorem mapowania, wybierz **Wideo Pionowe** (1080×1920) lub **Wideo Poziome** (1920×1080). Wybór jest zapamiętywany i dotyczy każdego pliku, któremu nie przypisano orientacji w `mapowanie_torow.txt`. Przycisk **?** obok pokazuje podpowiedź (po najechaniu), a po kliknięciu przenosi do tej Pomocy. Jeśli chcesz, by pliki były różnego rodzaju, dopisz orientację w pliku:
+**Orientacja wszystkich filmów:** w aplikacji, w kroku **Montaż** (sekcja **Rodzaj montażu**) wybierz **Wideo Pionowe** (1080×1920) lub **Wideo Poziome** (1920×1080). Wybór jest zapamiętywany i dotyczy każdego pliku, któremu nie przypisano orientacji w `mapowanie_torow.txt`. Przycisk **?** obok pokazuje podpowiedź (po najechaniu), a po kliknięciu przenosi do tej Pomocy. Jeśli chcesz, by pliki były różnego rodzaju, dopisz orientację w pliku:
 
 Format linii: `numer` albo `numer;orientacja`, gdzie orientacja to:
 
@@ -176,18 +170,18 @@ Plik zawiera **skopiowaną stronę z wynikami zawodnika z PractiScore** (wyniki 
 2.  Na stronie wyników zawodów znajdź swoje nazwisko (lista wyników ogólnych albo wyszukiwarka **Search**) i kliknij je. Otworzy się strona z wynikami zawodnika, z tabelą stage'ów (kolumny `Stage`, `#`, `%`, `Stg Pts`, `Pts`, `HF`, `Time`, `Div`, ...) oraz nazwą zawodów, datą i Twoim nazwiskiem u góry. Adres takiej strony ma postać:
     `https://practiscore.com/results/all/<id-zawodów>?q_individual=mmShooter_<id-zawodnika>`
     np. [https://practiscore.com/results/all/cd7e5150-2fb6-41fb-b7dd-4f08574509cc?q_individual=mmShooter_10148199](https://practiscore.com/results/all/cd7e5150-2fb6-41fb-b7dd-4f08574509cc?q_individual=mmShooter_10148199). Taki link możesz też zapisać lub wysłać dalej — otwiera od razu wyniki wybranego zawodnika.
-3.  Zaznacz całą stronę (**Ctrl+A**), skopiuj (**Ctrl+C**) i wklej do pliku `wyniki.txt` lub do edytora w zakładce **Zawody** (**Ctrl+V**), po czym zapisz. Nie trzeba niczego przycinać — program sam znajduje wiersze `Stage N` i pomija menu, stopkę i resztę strony.
+3.  Zaznacz całą stronę (**Ctrl+A**), skopiuj (**Ctrl+C**) i wklej do pliku `wyniki.txt` lub do edytora w kroku **Wyniki** (**Ctrl+V**), po czym zapisz. Nie trzeba niczego przycinać — program sam znajduje wiersze `Stage N` i pomija menu, stopkę i resztę strony.
 4.  Przy kolejnym zawodniku lub zawodach podmień całą zawartość pliku na nowo skopiowaną stronę.
 
 > Układ strony PractiScore może się zmienić; ważne, by w skopiowanym tekście były wiersze w formacie `Stage 1 Nazwa  miejsce  %  Stg Pts  Pts  HF  Time ...`. Nazwy stage'y mogą być dowolne (np. `Stage 3 Tor 3`), liczy się numer po słowie `Stage`.
 
 - Numer toru z `mapowanie_torow.txt` musi mieć odpowiadający wiersz `Stage N` w wynikach. Jeśli go brakuje, nagranie jest **pomijane** z komunikatem „brak wyników dla toru N”, a w aplikacji desktopowej ma status „pominięto”.
-- Jeśli pominięto wszystkie nagrania, aplikacja informuje, że wyniki nie zawierają przypisanych torów — sprawdź wtedy `mapowanie_torow.txt` i `wyniki.txt` w zakładce **Zawody**.
-- Plik wczytywany jest w UTF-8; w aplikacji desktopowej możesz go wkleić i zapisać bezpośrednio w zakładce **Zawody**.
-- **Format wyników (zakładka Zawody):** nad wyborem pliku wybierz jedną z opcji — **Practiscore** (domyślnie, wyniki wklejone ze strony PractiScore), **ECM** (wiersze `Stage 01  4.3290  40  8 0 0 0 0 0  9.24`, czas z ostatniej kolumny) lub **Trening** (ręcznie wpisane wiersze `numer toru; czas`, np. `1; 23` lub `3;20,81`). Wybór jest zapamiętywany.
+- Jeśli pominięto wszystkie nagrania, aplikacja informuje, że wyniki nie zawierają przypisanych torów — sprawdź wtedy tabelę planu w kroku **Montaż** i odczytane wyniki w kroku **Wyniki**.
+- Plik wczytywany jest w UTF-8; w aplikacji desktopowej możesz go wkleić i zapisać bezpośrednio w kroku **Wyniki** — tabela pod edytorem od razu pokaże odczytane tory.
+- **Format wyników (krok Wyniki):** nad wyborem pliku wybierz jedną z opcji — **Practiscore** (domyślnie, wyniki wklejone ze strony PractiScore), **ECM** (wiersze `Stage 01  4.3290  40  8 0 0 0 0 0  9.24`, czas z ostatniej kolumny) lub **Trening** (ręcznie wpisane wiersze `numer toru; czas`, np. `1; 23` lub `3;20,81`). Wybór jest zapamiętywany. Plansza na filmie pokazuje tylko pola, które są w wynikach: przy Treningu jedną linię `STAGE 3 | Czas: 20.81s`, przy ECM czas, HF i punkty (bez miejsca), a przy Practiscore komplet.
 
 3. **Dodatkowe teksty u góry wideo (`teksty_wideo.txt`):**
-   Checkbox **Czy dodać wyniki** steruje wyłącznie planszą z wynikami na dole filmu. Osobny checkbox **Czy dodać teksty wideo** w zakładce **Konfiguracja** (domyślnie zaznaczony, wybór jest zapamiętywany) steruje tekstami z `teksty_wideo.txt`, niezależnie od wyników. Pusty plik (lub plik bez wpisów w nawiasach kwadratowych) nie dodaje tekstów. Czas przebiegu z `wyniki.txt` nadal służy do przycięcia filmu, jeśli jest dostępny.
+   Checkbox **Czy dodać wyniki** steruje wyłącznie planszą z wynikami na dole filmu. Osobny checkbox **Czy dodać teksty wideo** w **Ustawieniach** (domyślnie zaznaczony, wybór jest zapamiętywany) steruje tekstami z `teksty_wideo.txt`, niezależnie od wyników. Pusty plik (lub plik bez wpisów w nawiasach kwadratowych) nie dodaje tekstów. Czas przebiegu z `wyniki.txt` nadal służy do przycięcia filmu, jeśli jest dostępny.
    Każdy tekst wpisz w nawiasach kwadratowych, np. `[Klub ZSD]`. Plik może zawierać zero lub kilka wpisów, ale **maksymalnie 5** (kolejne są ignorowane). Nadmiarowe białe znaki w tekście są normalizowane, a puste nawiasy pomijane. W aplikacji zaznaczenie tekstów wymaga istniejącego pliku; po odznaczeniu plik nie jest wymagany.
    - Teksty pojawiają się po kolei, neonowym cyjanem z ciemnym obrysem (czcionka Mister Brush z `Fonts/mister-brush/MisterBrush.ttf`), w górnej części wideo, z płynnym pojawianiem i znikaniem (0,4 s).
    - Każdy tekst wyświetla się min. 5 s (max 8 s), a przerwa między tekstami wynosi min. 2 s. Pierwszy tekst startuje po 1 s, a na końcu zostaje 1 s marginesu. Teksty są rozłożone równomiernie na całym filmie (bez długiej pustki na końcu).
@@ -199,14 +193,41 @@ Plik zawiera **skopiowaną stronę z wynikami zawodnika z PractiScore** (wyniki 
 1. **Przygotuj pliki wideo:** Po zawodach zrzuć nagrania z telefonu do `FOLDER_WEJSCIOWY`.
    - _Skrypt sortuje pliki alfabetycznie po nazwie, a numer toru każdego z nich bierze z odpowiedniej linii w `mapowanie_torow.txt` (patrz punkt 3a). Bez `mapowanie_torow.txt` kolejne pliki to Tor 1, 2, 3, itd._
 2. **Przygotuj podkłady:** Upewnij się, że w `FOLDER_MUZYKI` masz chociaż jeden plik `.mp3`. Skrypt losuje muzykę dla każdego toru.
-3. **Wklej wyniki:** Skopiuj stronę z wynikami zawodnika z PractiScore (jak to zrobić — patrz punkt 3b) i wklej do `wyniki.txt` lub w zakładce **Zawody**. Nie trzeba niczego przycinać.
+3. **Wklej wyniki:** Skopiuj stronę z wynikami zawodnika z PractiScore (jak to zrobić — patrz punkt 3b) i wklej do `wyniki.txt` lub w kroku **Wyniki**. Nie trzeba niczego przycinać.
 4. **Uruchom skrypt:**
    Otwórz terminal w folderze ze skryptem i wpisz:
    ```bash
    python ipsc_automato.py
    ```
-   Po każdym udanym renderze plik w `Gotowe` jest automatycznie przemianowywany przez `generate_names.py` na `YYYY-MM-DD - Nazwa zawodów - Tor X #bodycam.mp4`. Wymaga to poprawnie uzupełnionego `opis_zawodow.txt`.
-5. Poczekaj na wygenerowanie i przemianowanie plików wideo w `FOLDER_WYJSCIOWY`.
+   Gotowy film od razu dostaje nazwę `YYYY-MM-DD - Nazwa zawodów - Tor X #bodycam.mp4` (`generate_names.py`). Opis zawodów jest sprawdzany przed montażem: jeśli `opis_zawodow.txt` nie ma nazwy lub daty, montaż i tak się wykona, a filmy zachowają nazwy techniczne `Gotowe_Stage_X.mp4` (w dzienniku pojawi się ostrzeżenie).
+5. Poczekaj na wygenerowanie plików wideo w `FOLDER_WYJSCIOWY`.
+
+### ✂️ Montaż bez publikacji i tryb „Tylko przycięcie”
+
+Montaż nigdy niczego nie publikuje — najpierw możesz obejrzeć gotowe filmy, a wysłać je później (krok **Publikacja** albo komenda `automato.py publish`).
+
+- **Tylko przycięcie** — film jest przycinany do przebiegu (start timera i czas z wyników), bez muzyki, napisów, logo i zmiany rozdzielczości. Obraz jest kopiowany bez ponownego kodowania, więc trwa to kilka sekund zamiast minut. Start może wypaść ułamek sekundy wcześniej (na najbliższej klatce kluczowej). W tym trybie nagrania bez wyniku nie są pomijane — zostają w całości.
+- **Dodaj muzykę** — można wyłączyć podkład muzyczny także w pełnym montażu.
+- **Nadpisuj gotowe filmy** — domyślnie wyłączone: nagranie, którego gotowy film jest już w folderze wyjściowym, jest pomijane (ponowne uruchomienie montuje tylko brakujące filmy). Zaznacz, aby zmontować wszystko od nowa.
+
+### 💻 Praca z terminala (`automato.py`)
+
+Wszystko, co robi aplikacja, można zrobić z terminala na Windows i macOS. Montaż i publikacja to osobne komendy:
+
+```bash
+python automato.py check                       # test systemu (biblioteki, FFmpeg, kodeki)
+python automato.py plan                        # co zostanie zmontowane: tor, czas, decyzja, nazwa pliku
+python automato.py plan --detect-timer --json  # z analizą timera, wynik dla skryptów
+python automato.py render                      # pełny montaż (bez publikacji)
+python automato.py render --trim-only          # tylko przycięcie
+python automato.py render --no-music --no-texts --overwrite
+python automato.py publish youtube             # podgląd kolejki YouTube (nic nie wysyła)
+python automato.py publish youtube --publish --schedule "pon=07:30,sob=10:00"
+python automato.py publish cloudflare
+python automato.py publish buffer --platforms facebook,instagram
+```
+
+Ścieżki i ustawienia projektu podajesz flagami (`--input`, `--output`, `--music`, `--results`, `--results-mode practiscore|ecm|trening`, `--tracks`, `--texts`, `--description`, `--orientation V|H`, `--logo`, `--no-results`); bez nich używane są domyślne pliki z folderu projektu. `python automato.py KOMENDA --help` pokazuje wszystkie opcje. Ctrl+C przerywa montaż bezpiecznie po bieżącym etapie (drugie Ctrl+C kończy natychmiast). Kody wyjścia: `0` sukces, `1` błędy, `2` złe argumenty, `130` przerwano. Dotychczasowe `python ipsc_automato.py [--yt] [--publish] …` działa bez zmian.
 
 ## 📺 Publikowanie Shorts na YouTube
 
@@ -223,7 +244,7 @@ Skrypt używa **OAuth 2.0, a nie zwykłego klucza API** (tzw. _API key_). Sam kl
    - w [Audience](https://console.cloud.google.com/auth/audience), w sekcji **Test users**, dodaj konto Google, którym będziesz się logować.
 5. Utwórz dane logowania: **Dane logowania → Utwórz dane logowania → Identyfikator klienta OAuth** → typ aplikacji **Aplikacja komputerowa** (_Desktop app_) → **Utwórz**.
 6. W oknie z identyfikatorem kliknij **Pobierz JSON** i zapisz plik w katalogu projektu pod nazwą `youtube_client_secret.json`. Nie wpisuj tego pliku do repozytorium ani nikomu go nie przesyłaj.
-7. Zaloguj się w przeglądarce: w aplikacji desktopowej kliknij **Wyślij do YT** w zakładce **YouTube** (najlepiej z opcją „Tylko podgląd”) albo uruchom `python ipsc_automato.py --yt`. Zatwierdź dwa uprawnienia: przesyłanie filmów (`youtube.upload`) i odczyt kanału (`youtube.readonly`). Przy ostrzeżeniu „Google nie zweryfikowało tej aplikacji” wybierz **Zaawansowane → Przejdź do… (niebezpieczne)** — to Twoja własna aplikacja. Po zalogowaniu powstanie lokalny `youtube_token.json`, dzięki czemu kolejne uruchomienia nie wymagają logowania.
+7. Zaloguj się w przeglądarce: w aplikacji desktopowej kliknij **Wyślij do YT** w kroku **Publikacja → YouTube** (najlepiej z opcją „Tylko podgląd”) albo uruchom `python ipsc_automato.py --yt`. Zatwierdź dwa uprawnienia: przesyłanie filmów (`youtube.upload`) i odczyt kanału (`youtube.readonly`). Przy ostrzeżeniu „Google nie zweryfikowało tej aplikacji” wybierz **Zaawansowane → Przejdź do… (niebezpieczne)** — to Twoja własna aplikacja. Po zalogowaniu powstanie lokalny `youtube_token.json`, dzięki czemu kolejne uruchomienia nie wymagają logowania.
 
 Jeśli zobaczysz błąd **`Błąd 403: access_denied`**, sprawdź, czy konto jest dodane jako **Test user** (krok 4).
 
@@ -389,17 +410,18 @@ Link jest dopisywany po każdym pliku, więc przerwana wysyłka nie gubi już wy
 
 ## ⚠️ Najczęstsze problemy
 
+- **Gotowy film jest obrócony o 90° w odtwarzaczu:** nagrania z telefonu lub kamery mają w pliku znacznik obrotu. Montaż obraca obraz sam i usuwa ten znacznik z gotowego filmu. Filmy zmontowane przed tą poprawką (render FFmpeg z nakładkami) mogły go zachować — zmontuj je ponownie z zaznaczonym **Nadpisuj gotowe filmy**.
+- **„Nie wykryto sygnału timera” — film zostaje w całości:** start przebiegu jest szukany w dźwięku jako ciągły ton 2–3,5 kHz trwający co najmniej ok. 0,26 s (sygnał timera IPSC). Krótkie zagłuszenie tonu innym dźwiękiem (krok, szelest, stuknięcie) albo chwilowo cichszy fragment nie przerywają sygnału, a start jest liczony od początku piknięcia. Jeśli timer był daleko od kamery lub zagłuszony przez dłużej, kliknij w kroku **Montaż** **Wykryj start timera** i sprawdź kolumnę „Start timera”; takie nagranie zostanie zmontowane w całości.
 - **`ModuleNotFoundError: No module named 'google'`:** Brakuje bibliotek Google. Uruchom `python -m pip install -r requirements.txt` tym samym Pythonem, którym odpalasz skrypt.
 - **`Błąd 403: access_denied` przy logowaniu Google:** Projekt OAuth jest w trybie Testing, a Twoje konto nie jest testerem. Dodaj je w Google Cloud Console → Audience → Test users i spróbuj ponownie.
 - **`Brak pliku OAuth ... youtube_client_secret.json`:** Pobierz dane klienta OAuth typu „Aplikacja komputerowa” i zapisz je w katalogu projektu pod tą nazwą.
 - **`Nie można jednoznacznie wybrać kanału`:** Konto ma kilka kanałów — ustaw zmienną środowiskową `YOUTUBE_CHANNEL_ID`.
 - **Błąd daty/nazwy zawodów:** Uzupełnij `opis_zawodow.txt` (nazwa + `Match starts:`/`Data zawodów:`); numer toru musi występować w nazwie pliku (`Gotowe_Stage_3.mp4`).
-- **Film z toru został pominięty („brak wyników dla toru N”):** Pojawia się tylko przy zaznaczonym **Czy dodać wyniki**. W `wyniki.txt` nie ma wiersza `Stage N` dla numeru toru przypisanego w `mapowanie_torow.txt`. Sprawdź oba pliki w zakładce **Zawody** lub odznacz checkbox na zakładce **Główna**.
-- **Film wyszedł w złej orientacji:** W zakładce **Zawody** wybierz **Wideo Pionowe** lub **Wideo Poziome** (dotyczy wszystkich plików bez litery w `mapowanie_torow.txt`) albo dopisz w `mapowanie_torow.txt` po numerze toru `;H` (poziomy 1920×1080) lub `;V` (pionowy 1080×1920), np. `3;H` — ta litera ma pierwszeństwo.
+- **Film z toru został pominięty („brak wyników dla toru N”):** Pojawia się tylko przy zaznaczonym **Czy dodać wyniki**. W `wyniki.txt` nie ma wiersza `Stage N` dla numeru toru przypisanego w `mapowanie_torow.txt`. Sprawdź oba pliki w kroku **Wyniki** lub odznacz checkbox w kroku **Montaż**.
+- **Film wyszedł w złej orientacji:** W kroku **Montaż** wybierz **Wideo Pionowe** lub **Wideo Poziome** (dotyczy wszystkich plików bez litery w `mapowanie_torow.txt`) albo dopisz w `mapowanie_torow.txt` po numerze toru `;H` (poziomy 1920×1080) lub `;V` (pionowy 1080×1920), np. `3;H` — ta litera ma pierwszeństwo.
 - **Zakładka YouTube: „Brak pliku OAuth” lub „Brak bibliotek Google API”:** Zapisz `youtube_client_secret.json` w katalogu projektu (instrukcja wyżej) i zainstaluj zależności `python -m pip install -r requirements.txt`.
 - **Zakładka YouTube: „Shorts muszą mieć maksymalnie 180 sekund”:** Film pionowy jest dłuższy niż 3 minuty — skróć go lub zmień orientację toru na `H` w pliku z torami.
 - **Aplikacja po starcie otwiera zakładkę Pomoc:** Test systemu wykrył braki — wykonaj polecenia z sekcji **Do doinstalowania / naprawy** i uruchom aplikację ponownie.
-- **Błąd `[WinError 2] Nie można odnaleźć określonego pliku` lub problem z `None`:** MoviePy nie może znaleźć programu ImageMagick. Upewnij się, że ścieżka do `magick.exe` (lub `convert.exe`) w `settings.json` (lub w zakładce **Konfiguracja** aplikacji) jest w 100% poprawna dla Twojego komputera.
 - **Błąd `ModuleNotFoundError: No module named 'moviepy.editor'`:** Masz zainstalowaną nową wersję MoviePy (2.0+). Wpisz w konsoli `pip uninstall moviepy` a następnie `pip install "moviepy<2.0.0"`.
 - **Błąd `must be real number, not NoneType` przy zapisie wideo:** Masz zbyt nową bibliotekę `decorator`. Użyj `pip install "decorator==4.4.2"`.
 - **Błąd `Accessing time t=... with clip duration=...` dla muzyki:** Skrypt zapętla muzykę, więc krótki utwór nie powinien go wywołać; sprawdź, czy plik `.mp3` nie jest uszkodzony.

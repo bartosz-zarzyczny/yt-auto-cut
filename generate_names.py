@@ -106,6 +106,37 @@ def read_match_data(description_path: Path = DESCRIPTION_FILE) -> MatchData:
     return MatchData(name, match_date, location, match_type, level)
 
 
+# Pola zapisywane przez formularz aplikacji na początku opis_zawodow.txt (reszta tekstu zostaje bez zmian).
+MATCH_FIELD_LABELS = (
+    ("name", "Nazwa zawodów"),
+    ("match_date", "Data zawodów"),
+    ("location", "Miejsce"),
+    ("match_type", "Typ zawodów"),
+    ("level", "Poziom"),
+)
+
+
+def apply_match_fields(text: str, fields: dict) -> str:
+    """Wstawia pola formularza na początek opisu, usuwając ich poprzednie wersje; pozostały tekst zostaje.
+
+    fields: {"name", "match_date" (date lub tekst RRRR-MM-DD), "location", "match_type", "level"}."""
+    labels = [label for _, label in MATCH_FIELD_LABELS]
+    pattern = re.compile(r"^\s*(?:" + "|".join(re.escape(label) for label in labels) + r")\s*:", re.IGNORECASE)
+    rest = [line for line in text.splitlines() if not pattern.match(line)]
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    header = []
+    for key, label in MATCH_FIELD_LABELS:
+        value = fields.get(key)
+        if isinstance(value, date):
+            value = value.isoformat()
+        value = " ".join(str(value or "").split())
+        if value:
+            header.append(f"{label}: {value}")
+    parts = header + ([""] + rest if rest and header else rest)
+    return "\n".join(parts).rstrip() + "\n"
+
+
 def generate_title(
     file_name: Union[str, Path], description_path: Path = DESCRIPTION_FILE
 ) -> str:
