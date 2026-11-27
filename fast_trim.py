@@ -17,14 +17,20 @@ def ffmpeg_binary() -> str:
     return get_setting("FFMPEG_BINARY")
 
 
-def probe_duration(path) -> float:
-    """Długość filmu w sekundach odczytana z nagłówka (bez dekodowania klatek)."""
+def probe_media(path) -> dict:
+    """Długość (s) i obecność dźwięku odczytane z nagłówka pliku (bez dekodowania klatek)."""
     from moviepy.video.io.ffmpeg_reader import ffmpeg_parse_infos
 
-    duration = ffmpeg_parse_infos(str(path)).get("duration")
+    infos = ffmpeg_parse_infos(str(path))
+    duration = infos.get("duration")
     if not duration:
         raise ValueError(f"Nie można odczytać długości filmu: {Path(path).name}")
-    return float(duration)
+    return {"duration": float(duration), "has_audio": bool(infos.get("audio_found"))}
+
+
+def probe_duration(path) -> float:
+    """Długość filmu w sekundach odczytana z nagłówka (bez dekodowania klatek)."""
+    return probe_media(path)["duration"]
 
 
 def build_trim_command(

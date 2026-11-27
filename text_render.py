@@ -84,10 +84,3 @@ def render_text(
         align=align,
     )
     return np.array(image)
-
-
-def text_clip(text: str, duration: float, **style):
-    """Klip MoviePy z przezroczystym tłem (kanał alfa staje się maską)."""
-    from moviepy.editor import ImageClip
-
-    return ImageClip(render_text(text, **style), transparent=True).set_duration(duration)

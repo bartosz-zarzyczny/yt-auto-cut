@@ -2,7 +2,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from threading import Event
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -11,7 +10,6 @@ from PySide6.QtWidgets import QApplication
 
 import desktop_app
 import ui_theme
-from video_cancellation import CancellableProgressLogger
 
 
 def _window(values=None):
@@ -95,18 +93,7 @@ class MainWindowTests(unittest.TestCase):
             window.close()
 
 
-class ProgressLoggerTests(unittest.TestCase):
-    def test_reports_video_frames_only(self):
-        reported = []
-        logger = CancellableProgressLogger(Event(), reported.append)
-        logger.bars["chunk"] = {"total": 10}
-        logger.bars_callback("chunk", "index", 5)
-        logger.bars["t"] = {"total": 100}
-        logger.bars_callback("t", "index", 49)
-        logger.bars_callback("t", "index", 49)  # bez zmiany — nie zgłaszamy ponownie
-        logger.bars_callback("t", "index", 99)
-        self.assertEqual(reported, [0.5, 1.0])
-
+class FormatTests(unittest.TestCase):
     def test_duration_format(self):
         self.assertEqual(desktop_app.format_duration(42), "42 s")
         self.assertEqual(desktop_app.format_duration(80), "1 min 20 s")

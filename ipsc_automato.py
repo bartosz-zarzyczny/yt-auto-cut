@@ -7,21 +7,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Callable, List, Optional
-from moviepy.editor import VideoFileClip, CompositeVideoClip, CompositeAudioClip, AudioFileClip
-import moviepy.audio.fx.all as afx
+from PIL import Image
 from timer_detect import zglos_wykrycie_timera, znajdz_sygnaly_timera
-from timer_trim import choose_trim_range, trim_video
-from fast_trim import probe_duration, trim_copy
-from additional_texts import create_text_clips
-from text_render import text_clip
-from logo_overlay import create_logo_clip
+from timer_trim import choose_trim_range
+from fast_trim import ffmpeg_binary, probe_media, trim_copy
+from ffmpeg_render import POSITION_CENTER, Overlay, RenderJob, run as render_ffmpeg
+from additional_texts import plan_text_overlays
+from text_render import render_text
+from logo_overlay import logo_position, prepare_logo
 from track_order import RESOLUTIONS, DEFAULT_RESOLUTION
 from track_mapping import assign_tracks
 from file_migration import move_old_files
 from app_settings import ensure_settings_file
-from system_settings import PROJECT_DIR, choose_font, check_environment, preset_for_codec
+from system_settings import PROJECT_DIR, choose_font, check_environment
 from generate_names import generate_title, read_match_data, safe_file_name
-from video_cancellation import CancellableProgressLogger, GenerationCancelled
+from video_cancellation import GenerationCancelled
 
 # Pillow compatibility: some Pillow versions removed Image.ANTIALIAS constant.
 # MoviePy (resize) expects Image.ANTIALIAS; provide a fallback mapping to Resampling.LANCZOS.
@@ -121,6 +121,7 @@ from results_parser import (  # noqa: E402,F401 — ponowny eksport dla zgodnoś
 
 VIDEO_EXTENSIONS = (".mp4", ".mov")
 MUSIC_VOLUME = 0.12
+RESULTS_POSITION = 0.85  # górna krawędź planszy wyników jako ułamek wysokości filmu
 
 
 def list_source_videos(folder) -> List[str]:
@@ -220,9 +221,11 @@ def uruchom_automatyzacje(
     cancel_event: Optional[Event] = None,
     publish_options: Optional[PublishOptions] = None,
     render_progress_callback: Optional[Callable[[float], None]] = None,
+    timer_starts: Optional[dict] = None,
 ):
     """progress_callback(indeks, liczba, plik, status): status "started" na początku filmu, potem wynik.
-    render_progress_callback(ułamek 0..1): postęp renderowania bieżącego filmu."""
+    render_progress_callback(ułamek 0..1): postęp renderowania bieżącego filmu.
+    timer_starts: {plik: start timera w sekundach albo None} z planu — te nagrania nie są analizowane ponownie."""
     konfiguracja = konfiguracja or KonfiguracjaSciezek()
     options = publish_options or PublishOptions()
 
@@ -287,89 +290,70 @@ def uruchom_automatyzacje(
         sciezka_tymczasowa = sciezka_wyj.with_name(
             f"Gotowe_Stage_{nr_toru}_TEMP_MPY_{uuid.uuid4().hex}.mp4"
         )
-        sciezka_audio_tymczasowego = sciezka_tymczasowa.with_name(
-            f"{sciezka_tymczasowa.stem}_TEMP_AUDIO.m4a"
-        )
-        video = None
-        wideo_koncowe = None
-        audio_muzyka = None
-
         try:
             sprawdz_przerwanie()
-            sygnaly = zglos_wykrycie_timera(sciezka_wej, raportuj, cancel_event)
+            if timer_starts is not None and nazwa_pliku in timer_starts:
+                start_timera = timer_starts[nazwa_pliku]
+                sygnaly = [(start_timera, 0.0)] if start_timera is not None else []
+                raportuj("[TIMER] Start timera z planu montażu: "
+                         + (f"{start_timera:.2f}s" if start_timera is not None else "nie wykryto"))
+            else:
+                sygnaly = zglos_wykrycie_timera(sciezka_wej, raportuj, cancel_event)
             sprawdz_przerwanie()
 
+            informacje = probe_media(sciezka_wej)
+            zakres = choose_trim_range(sygnaly, czas_przebiegu, informacje["duration"], raportuj)
+
             if konfiguracja.trim_only:
-                zakres = choose_trim_range(sygnaly, czas_przebiegu, probe_duration(sciezka_wej), raportuj)
                 raportuj("Przycinanie (kopiowanie obrazu bez ponownego kodowania)...")
                 trim_copy(sciezka_wej, sciezka_tymczasowa, zakres, cancel_event)
             else:
-                video = VideoFileClip(sciezka_wej)
-                sprawdz_przerwanie()
-                video = trim_video(video, sygnaly, czas_przebiegu, raportuj)
-
-                nowy_czas_trwania = video.duration
+                start, koniec = zakres if zakres else (0.0, informacje["duration"])
+                nowy_czas_trwania = koniec - start
                 raportuj(f"Czas wideo: {nowy_czas_trwania:.2f}s")
+                szerokosc, wysokosc = rozdzielczosc
 
-                # --- MUZYKA ---
-                if muzyka_pliki:
-                    losowy_utwor = random.choice(muzyka_pliki)
-                    sciezka_muzyki = os.path.join(konfiguracja.folder_muzyki, losowy_utwor)
-
-                    audio_muzyka = AudioFileClip(sciezka_muzyki)
-                    audio_muzyka = afx.audio_loop(audio_muzyka, duration=nowy_czas_trwania)
-
-                    if hasattr(audio_muzyka, 'volx'):
-                        audio_muzyka = audio_muzyka.volx(MUSIC_VOLUME)
-                    elif hasattr(audio_muzyka, 'multiply_volume'):
-                        audio_muzyka = audio_muzyka.multiply_volume(MUSIC_VOLUME)
-                    else:
-                        audio_muzyka = audio_muzyka.fl(lambda gf, t: MUSIC_VOLUME * gf(t), keep_duration=True)
-
-                    audio_muzyka = audio_muzyka.fx(afx.audio_fadeout, 1.0)
-
-                    ziksowane_audio = CompositeAudioClip([video.audio, audio_muzyka]).set_fps(44100)
-                    video = video.set_audio(ziksowane_audio)
-
-                # --- NAPISY ---
-                warstwy_napisow = []
+                # --- NAKŁADKI: plansza wyników, teksty wideo, logo ---
+                nakladki = []
                 if konfiguracja.dodaj_napisy and dane:
-                    tekst_wyswietlany = format_result_plate(nr_toru, dane)
-
-                    napis = text_clip(
-                        tekst_wyswietlany, nowy_czas_trwania, font_path=choose_font(), font_size=55,
-                        color="white", stroke_color="black", stroke_width=2.5,
-                    )
-
-                    # Napis wyrównany do dołu
-                    napis = napis.set_position(('center', 0.85), relative=True)
-                    warstwy_napisow = [napis]
-
-                # --- ZMIANA ROZDZIELCZOŚCI (H = 1920x1080, V/domyślnie = 1080x1920) ---
-                video = video.resize(newsize=rozdzielczosc)
-                # Tworzymy Composite z jawnie ustawionym rozmiarem wyjściowym, aby napisy i pozycjonowanie działały poprawnie
+                    plansza = Image.fromarray(render_text(
+                        format_result_plate(nr_toru, dane), choose_font(), 55, "white", "black", 2.5,
+                    ))
+                    nakladki.append(Overlay(plansza, POSITION_CENTER, int(RESULTS_POSITION * wysokosc),
+                                            0.0, nowy_czas_trwania))
                 if konfiguracja.add_video_texts:
-                    warstwy_napisow += create_text_clips(
-                        str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, raportuj
+                    nakladki += plan_text_overlays(
+                        str(konfiguracja.plik_z_tekstami), nowy_czas_trwania, wysokosc, raportuj
                     )
-                klip_logo = create_logo_clip(konfiguracja.plik_logo, nowy_czas_trwania, rozdzielczosc[0], raportuj)
-                if klip_logo is not None:
-                    warstwy_napisow.append(klip_logo)
-                wideo_koncowe = CompositeVideoClip([video, *warstwy_napisow], size=rozdzielczosc).set_fps(30)
+                logo = prepare_logo(konfiguracja.plik_logo, raportuj)
+                if logo is not None:
+                    x, y = logo_position(logo.width, szerokosc)
+                    nakladki.append(Overlay(logo, x, y, 0.0, nowy_czas_trwania))
+
+                # --- MUZYKA (losowy utwór, zapętlony i ściszony) ---
+                muzyka = None
+                if muzyka_pliki:
+                    muzyka = Path(konfiguracja.folder_muzyki) / random.choice(muzyka_pliki)
                 sprawdz_przerwanie()
 
-                # --- RENDEROWANIE Z ZACHOWANIEM KOLORÓW I BEZ OBROTÓW ---
+                # --- RENDEROWANIE JEDNYM POLECENIEM FFMPEG ---
                 raportuj(f"Rozpoczynam renderowanie ({kodek})...")
-                wideo_koncowe.write_videofile(
-                    str(sciezka_tymczasowa),
-                    fps=30,
-                    codec=kodek,
-                    audio_codec="aac",
-                    bitrate="8000k",
-                    preset=preset_for_codec(kodek),
-                    ffmpeg_params=['-pix_fmt', 'yuv420p'],  # Gwarantuje poprawne kolory i odtwarzanie w Windows
-                    temp_audiofile=str(sciezka_audio_tymczasowego),
-                    logger=CancellableProgressLogger(cancel_event or Event(), render_progress_callback),
+                render_ffmpeg(
+                    ffmpeg_binary(),
+                    RenderJob(
+                        source=Path(sciezka_wej),
+                        output=sciezka_tymczasowa,
+                        resolution=rozdzielczosc,
+                        duration=nowy_czas_trwania,
+                        trim_start=start,
+                        has_audio=informacje["has_audio"],
+                        music=muzyka,
+                        music_volume=MUSIC_VOLUME,
+                        overlays=nakladki,
+                        codec=kodek,
+                    ),
+                    cancel_event,
+                    render_progress_callback,
                 )
 
             sprawdz_przerwanie()
@@ -391,14 +375,10 @@ def uruchom_automatyzacje(
             if progress_callback:
                 progress_callback(indeks, total, nazwa_pliku, "error")
         finally:
-            for klip in (wideo_koncowe, video, audio_muzyka):
-                if klip is not None:
-                    klip.close()
-            for plik_tymczasowy in (sciezka_tymczasowa, sciezka_audio_tymczasowego):
-                try:
-                    plik_tymczasowy.unlink()
-                except FileNotFoundError:
-                    pass
+            try:
+                sciezka_tymczasowa.unlink()
+            except FileNotFoundError:
+                pass
 
     if options.cloudflare and not przerwano:
         from cloudflare_upload import upload_to_configured_bucket

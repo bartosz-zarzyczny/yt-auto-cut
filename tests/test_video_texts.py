@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, sentinel
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -35,35 +35,23 @@ class VideoTextTests(unittest.TestCase):
                             dodaj_napisy=add_results,
                             add_video_texts=add_texts,
                         )
-                        video = MagicMock()
-                        video.duration = 20
-                        video.resize.return_value = video
-                        result_clip = MagicMock()
-                        result_clip.set_position.return_value = sentinel.result
-                        with patch.object(ipsc_automato, "check_environment", return_value=(True, "codec")), \
-                             patch.object(ipsc_automato, "czytaj_wyniki_z_pliku", return_value={1: results}), \
-                             patch.object(ipsc_automato, "assign_tracks", return_value=[("video.mp4", 1, (100, 100))]), \
-                             patch.object(ipsc_automato, "zglos_wykrycie_timera", return_value=[]), \
-                             patch.object(ipsc_automato, "VideoFileClip", return_value=video), \
-                             patch.object(ipsc_automato, "trim_video", return_value=video), \
-                             patch.object(ipsc_automato, "text_clip", return_value=result_clip), \
-                             patch.object(ipsc_automato, "choose_font"), \
-                             patch.object(ipsc_automato, "create_text_clips", return_value=[sentinel.text]) as texts, \
-                             patch.object(ipsc_automato, "create_logo_clip", return_value=None), \
-                             patch.object(ipsc_automato, "CompositeVideoClip") as composite, \
-                             patch.object(ipsc_automato, "CancellableProgressLogger"), \
-                             patch.object(ipsc_automato.os, "replace"), \
-                             patch.object(ipsc_automato, "generate_title", return_value="title"):
+                        text_overlay = MagicMock(name="text_overlay")
+                        with patch.object(ipsc_automato, "check_environment", return_value=(True, "codec")),                              patch.object(ipsc_automato, "czytaj_wyniki_z_pliku", return_value={1: results}),                              patch.object(ipsc_automato, "assign_tracks", return_value=[("video.mp4", 1, (100, 200))]),                              patch.object(ipsc_automato, "zglos_wykrycie_timera", return_value=[]),                              patch.object(ipsc_automato, "probe_media", return_value={"duration": 20, "has_audio": True}),                              patch.object(ipsc_automato, "plan_text_overlays", return_value=[text_overlay]) as texts,                              patch.object(ipsc_automato, "prepare_logo", return_value=None),                              patch.object(ipsc_automato, "ffmpeg_binary", return_value="ffmpeg"),                              patch.object(ipsc_automato, "render_ffmpeg") as render,                              patch.object(ipsc_automato.os, "replace"),                              patch.object(ipsc_automato, "generate_title", return_value="title"):
                             self.assertTrue(ipsc_automato.uruchom_automatyzacje(konfiguracja=config))
-                            layers = [video]
+                            job = render.call_args.args[1]
+                            self.assertEqual(job.duration, 20)
+                            self.assertEqual(job.resolution, (100, 200))
+                            overlays = list(job.overlays)
                             if add_results:
-                                layers.append(sentinel.result)
+                                plate = overlays.pop(0)
+                                self.assertEqual(plate.y, int(0.85 * 200))
+                                self.assertEqual(plate.x, "center")
                             if add_texts:
-                                layers.append(sentinel.text)
-                                texts.assert_called_once_with(str(config.plik_z_tekstami), 20, unittest.mock.ANY)
+                                self.assertEqual(overlays, [text_overlay])
+                                texts.assert_called_once_with(str(config.plik_z_tekstami), 20, 200, unittest.mock.ANY)
                             else:
+                                self.assertEqual(overlays, [])
                                 texts.assert_not_called()
-                            composite.assert_called_once_with(layers, size=(100, 100))
 
     def test_checkbox_state_is_saved_and_passed_to_config(self):
         app = QApplication.instance() or QApplication([])

@@ -2,7 +2,7 @@ import unittest
 
 from additional_texts import FONT_PATH
 from system_settings import BUNDLED_FONT, choose_font
-from text_render import load_font, render_text, text_clip, wrap_text
+from text_render import load_font, render_text, wrap_text
 
 
 class TextRenderTests(unittest.TestCase):
@@ -29,11 +29,6 @@ class TextRenderTests(unittest.TestCase):
     def test_polish_characters_render(self):
         image = render_text("ąćęłńóśźż ĄĆĘŁŃÓŚŹŻ", FONT_PATH, 60)
         self.assertGreater((image[:, :, 3] > 0).sum(), 100)
-
-    def test_clip_has_mask_and_duration(self):
-        clip = text_clip("Tor 3", 4.0, font_path=BUNDLED_FONT, font_size=40, color="white")
-        self.assertEqual(clip.duration, 4.0)
-        self.assertIsNotNone(clip.mask)
 
 
 if __name__ == "__main__":

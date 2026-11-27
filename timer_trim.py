@@ -44,16 +44,3 @@ def choose_trim_range(
     start, end = result
     report(f"[PRZYCIĘCIE] {start:.2f}s -> {end:.2f}s (czas przebiegu {run_time:.2f}s)")
     return result
-
-
-def trim_video(
-    video,
-    signals,
-    run_time: Optional[float],
-    log_callback: Optional[Callable[[str], None]] = None,
-):
-    """Przycina klip do przebiegu i wypisuje informację na konsoli."""
-    result = choose_trim_range(signals, run_time, video.duration, log_callback)
-    if result is None:
-        return video
-    return video.subclip(*result)

@@ -172,10 +172,11 @@ class AssemblyWorker(QObject):
     render_progress = Signal(float)
     completed = Signal(bool, str)
 
-    def __init__(self, config: KonfiguracjaSciezek, cancel_event: Event):
+    def __init__(self, config: KonfiguracjaSciezek, cancel_event: Event, timer_starts: Optional[dict] = None):
         super().__init__()
         self.config = config
         self.cancel_event = cancel_event
+        self.timer_starts = timer_starts
         self.error_count = 0
         self.completed_count = 0
         self.skipped_count = 0
@@ -188,6 +189,7 @@ class AssemblyWorker(QObject):
                 progress_callback=self._report_progress,
                 cancel_event=self.cancel_event,
                 render_progress_callback=self.render_progress.emit,
+                timer_starts=self.timer_starts,
             )
         except Exception as error:
             self.log.emit(f"BŁĄD: {error}")
@@ -2288,7 +2290,8 @@ class MainWindow(QMainWindow):
 
         self.cancel_event = Event()
         self.worker_thread = QThread(self)
-        self.worker = AssemblyWorker(config, self.cancel_event)
+        # Start timera wykryty w planie nie jest liczony drugi raz.
+        self.worker = AssemblyWorker(config, self.cancel_event, dict(self._timer_results))
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker.log.connect(self._append_log)
