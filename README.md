@@ -410,6 +410,7 @@ Link jest dopisywany po każdym pliku, więc przerwana wysyłka nie gubi już wy
 
 ## ⚠️ Najczęstsze problemy
 
+- **Gotowy film jest obrócony o 90° w odtwarzaczu:** nagrania z telefonu lub kamery mają w pliku znacznik obrotu. Montaż obraca obraz sam i usuwa ten znacznik z gotowego filmu. Filmy zmontowane przed tą poprawką (render FFmpeg z nakładkami) mogły go zachować — zmontuj je ponownie z zaznaczonym **Nadpisuj gotowe filmy**.
 - **„Nie wykryto sygnału timera” — film zostaje w całości:** start przebiegu jest szukany w dźwięku jako ciągły ton 2–3,5 kHz trwający co najmniej ok. 0,26 s (sygnał timera IPSC). Krótkie zagłuszenie tonu innym dźwiękiem (krok, szelest, stuknięcie) albo chwilowo cichszy fragment nie przerywają sygnału, a start jest liczony od początku piknięcia. Jeśli timer był daleko od kamery lub zagłuszony przez dłużej, kliknij w kroku **Montaż** **Wykryj start timera** i sprawdź kolumnę „Start timera”; takie nagranie zostanie zmontowane w całości.
 - **`ModuleNotFoundError: No module named 'google'`:** Brakuje bibliotek Google. Uruchom `python -m pip install -r requirements.txt` tym samym Pythonem, którym odpalasz skrypt.
 - **`Błąd 403: access_denied` przy logowaniu Google:** Projekt OAuth jest w trybie Testing, a Twoje konto nie jest testerem. Dodaj je w Google Cloud Console → Audience → Test users i spróbuj ponownie.

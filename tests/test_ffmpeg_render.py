@@ -103,6 +103,34 @@ class RenderEndToEndTests(unittest.TestCase):
             self.assertEqual(image.size, (180, 320))
             self.assertEqual(image.convert("RGB").getpixel((90, 280)), (255, 255, 255))
 
+    def test_rotated_phone_recording_is_not_rotated_twice(self):
+        # Nagranie poziome (lewa połowa czerwona, prawa niebieska) ze znacznikiem obrotu −90°, jak z kamery.
+        ffmpeg = ffmpeg_binary()
+        landscape = self.root / "landscape.mp4"
+        rotated = self.root / "rotated.mp4"
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=red:size=160x180:duration=3",
+                        "-f", "lavfi", "-i", "color=blue:size=160x180:duration=3",
+                        "-filter_complex", "[0:v][1:v]hstack", "-c:v", "libx264", str(landscape)], check=True)
+        made = subprocess.run([ffmpeg, "-v", "error", "-y", "-display_rotation", "-90", "-i", str(landscape),
+                               "-c", "copy", str(rotated)])
+        if made.returncode:
+            self.skipTest("FFmpeg bez opcji -display_rotation (wymagany 7.0+ do przygotowania nagrania)")
+        output = self.root / "out.mp4"
+        logo = Image.new("RGBA", (20, 20), (0, 255, 0, 255))
+        ffmpeg_render.run(ffmpeg, RenderJob(rotated, output, (180, 320), 2.0, has_audio=False,
+                                            overlays=[Overlay(logo, 5, 5, 0.0, 2.0)]))
+        info = subprocess.run([ffmpeg, "-hide_banner", "-i", str(output)], capture_output=True, text=True).stderr
+        self.assertNotIn("rotation", info)
+        frame = self.root / "frame.png"
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-noautorotate", "-ss", "1", "-i", str(output),
+                        "-frames:v", "1", str(frame)], check=True)
+        with Image.open(frame) as image:
+            image = image.convert("RGB")
+            self.assertEqual(image.size, (180, 320))
+            top, bottom = image.getpixel((90, 80)), image.getpixel((90, 240))
+        self.assertGreater(top[0], 200)       # obrót zgodnie z ruchem wskazówek: lewa (czerwona) część na górze
+        self.assertGreater(bottom[2], 200)
+
     def test_cancel_stops_render(self):
         cancel = Event()
         cancel.set()

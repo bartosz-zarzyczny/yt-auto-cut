@@ -18,6 +18,7 @@ AUDIO_BITRATE = "192k"
 MUSIC_FADE_OUT = 1.0
 TEXT_FADE = 0.4
 POSITION_CENTER = "center"
+STRIP_ROTATION = "sidedata=mode=delete:type=DISPLAYMATRIX"
 
 # Jakość dobrana do kodeka (zamiast stałego bitrate). AMF i QSV nie były testowane na sprzęcie,
 # więc zostają przy bitrate jak dotąd.
@@ -90,7 +91,9 @@ def build_command(ffmpeg: str, job: RenderJob, overlay_files: Sequence[Path]) ->
             f"[v{index}][o{index}]overlay=x={_overlay_x(overlay)}:y={int(overlay.y)}"
             f":enable='between(t,{overlay.start:.3f},{overlay.end:.3f})':eof_action=pass[v{index + 1}]"
         )
-    filters.append(f"[v{len(job.overlays)}]format=yuv420p[vout]")
+    # Nagrania z telefonu/kamery mają znacznik obrotu (np. −90°). FFmpeg obraca obraz sam, ale przy
+    # nakładkach potrafi przepisać ten znacznik do gotowego filmu — odtwarzacz obróciłby go wtedy drugi raz.
+    filters.append(f"[v{len(job.overlays)}]format=yuv420p,{STRIP_ROTATION}[vout]")
 
     # Dźwięk: oryginał + zapętlona, ściszona muzyka z wyciszeniem na końcu.
     audio_label = None
