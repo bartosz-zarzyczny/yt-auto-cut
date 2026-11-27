@@ -61,6 +61,12 @@ from app_settings import (
     saved_cloudflare_settings,
 )
 from system_check import format_html, run_system_check
+from generate_names import apply_match_fields, generate_title, read_match_data
+from results_parser import RESULTS_MODE_LABELS, detect_results_mode, parse_results
+from ui.competition_form import CompetitionForm
+from ui.navigation import STATUS_OK, STATUS_WARNING, StepNavigation
+from ui.plan_table import TIMER_NOT_CHECKED, TIMER_NOT_FOUND, PlanRow, PlanTable
+from ui.results_preview import ResultsPreview
 from ui_icons import icon
 from ui_theme import (
     THEME_CHOICES,
@@ -82,6 +88,10 @@ SOCIAL_LINKS = (
 )
 PROGRESS_STEPS = 1000  # rozdzielczość paska postępu montażu
 AUTOSAVE_DELAY_MS = 800  # zapis edytora po tej przerwie w pisaniu
+RESULTS_PREVIEW_DELAY_MS = 300
+PLAN_REFRESH_DELAY_MS = 300
+STEP_COMPETITION, STEP_RESULTS, STEP_ASSEMBLY, STEP_PUBLISH = range(4)
+VIDEO_SUFFIXES = {".mp4", ".mov"}
 move_old_files(PROJECT_DIR)
 ensure_settings_file()
 
@@ -98,6 +108,7 @@ try:
         TRYB_WYNIKOW_PRACTISCORE,
         TRYB_WYNIKOW_TRENING,
         KonfiguracjaSciezek,
+        plan_assembly,
         uruchom_automatyzacje,
     )
     ASSEMBLY_ERROR = ""
@@ -115,6 +126,7 @@ except Exception as import_error:
     TRYB_WYNIKOW_ECM = "ecm"
     TRYB_WYNIKOW_TRENING = "trening"
     uruchom_automatyzacje = None
+    plan_assembly = None
 
     @dataclass(frozen=True)
     class KonfiguracjaSciezek:
@@ -347,6 +359,26 @@ class CloudflareWorker(QObject):
         self.completed.emit(failed == 0, message)
 
 
+class TimerDetectWorker(QObject):
+    """Analiza dźwięku wszystkich nagrań do montażu (plan_assembly z detect_timer=True)."""
+
+    finished = Signal(object, str)  # {plik: start w sekundach albo None}, błąd ("" / "cancelled" / opis)
+
+    def __init__(self, config: KonfiguracjaSciezek, cancel_event: Event):
+        super().__init__()
+        self.config = config
+        self.cancel_event = cancel_event
+
+    def run(self):
+        try:
+            plan = plan_assembly(self.config, detect_timer=True, cancel_event=self.cancel_event)
+        except Exception as error:
+            cancelled = type(error).__name__ == "GenerationCancelled"
+            self.finished.emit({}, "cancelled" if cancelled else str(error))
+            return
+        self.finished.emit({item.file_name: item.timer_start for item in plan if item.action == "render"}, "")
+
+
 class SystemCheckWorker(QObject):
     finished = Signal(str, bool)
 
@@ -405,6 +437,17 @@ class MainWindow(QMainWindow):
         self._autosave_timers: Dict[str, QTimer] = {}
         self._path_errors: Dict[str, QLabel] = {}
         self._render_started_at: Optional[float] = None
+        self._timer_results: Dict[str, Optional[float]] = {}
+        self.timer_thread: Optional[QThread] = None
+        self.timer_worker: Optional[TimerDetectWorker] = None
+        self.timer_cancel_event: Optional[Event] = None
+        self._results_count = 0
+        self._current_plan: list = []
+        self._syncing_description = False
+        self._plan_timer = QTimer(self)
+        self._plan_timer.setSingleShot(True)
+        self._plan_timer.setInterval(PLAN_REFRESH_DELAY_MS)
+        self._plan_timer.timeout.connect(self._refresh_plan)
         self._current_video = (0, 0, "")
         self.theme_mode = str(self.settings.value("theme", THEME_SYSTEM))
         app = QApplication.instance()
@@ -421,55 +464,145 @@ class MainWindow(QMainWindow):
             app.styleHints().colorSchemeChanged.connect(self._on_system_theme_changed)
 
     def _build_ui(self):
-        central = QWidget(self)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(30, 26, 30, 28)
-        layout.setSpacing(18)
-
-        header = QHBoxLayout()
-        logo = QLabel("IPSC")
-        logo.setObjectName("brand")
-        name = QLabel("VIDEO AUTOMATO")
-        name.setObjectName("brandTitle")
-        header.addWidget(logo)
-        header.addWidget(name)
-        header.addStretch(1)
-        version = QLabel("WORKSPACE  /  2026")
-        version.setObjectName("eyebrow")
-        header.addWidget(version)
-        layout.addLayout(header)
-
-        description = QLabel("Produkcja i organizacja materiałów wideo z zawodów")
-        description.setObjectName("subtitle")
-        layout.addWidget(description)
-
-        self.tabs = QTabWidget()
+        self.tabs = StepNavigation(lambda name, role: icon(name, self.colors[role]))
+        # Kolejność budowania: Zawody tworzą pola folderów, z których korzystają kolejne kroki.
+        self.tab_competition = self._build_competition_step()
+        self.tab_results = self._build_results_step()
         self.tab_main = self._build_main_tab()
-        self.tab_competition = self._build_competition_tab()
+        self.tab_publish = self._build_publish_step()
         self.tab_config = self._build_config_tab()
-        self.tabs.addTab(self.tab_main, "  Główna  ")
-        self.tabs.addTab(self.tab_competition, "  Zawody  ")
-        self.tabs.addTab(self.tab_config, "  Konfiguracja  ")
-        self.tabs.addTab(self._build_youtube_tab(), "  YouTube  ")
-        self.tab_buffer = self._build_buffer_tab()
-        self.tabs.addTab(self.tab_buffer, "  Buffer  ")
         self.tab_help = self._build_help_tab()
-        self.tabs.addTab(self.tab_help, "  Pomoc  ")
-        layout.addWidget(self.tabs, 1)
-        self.setCentralWidget(central)
+        self.tabs.add_section("Kroki")
+        self.tabs.addTab(self.tab_competition, "1. Zawody", "trophy")
+        self.tabs.addTab(self.tab_results, "2. Wyniki", "table")
+        self.tabs.addTab(self.tab_main, "3. Montaż", "film")
+        self.tabs.addTab(self.tab_publish, "4. Publikacja", "upload")
+        self.tabs.addTab(self.tab_config, "Ustawienia", "settings", bottom=True)
+        self.tabs.addTab(self.tab_help, "Pomoc", "help", bottom=True)
+        self.tabs.currentChanged.connect(self._on_step_changed)
+        self.setCentralWidget(self.tabs)
+        self._connect_plan_triggers()
         self._apply_theme()
 
-    def _build_main_tab(self):
+    def _page(self, title: str, subtitle: str):
+        """Strona kroku z tytułem; zwraca (strona, układ)."""
         page = QWidget()
+        page.setObjectName("scrollPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setContentsMargins(28, 22, 28, 22)
         layout.setSpacing(12)
+        title_label = QLabel(title)
+        title_label.setObjectName("pageTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("muted")
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(title_label)
+        layout.addWidget(subtitle_label)
+        return page, layout
 
-        paths = QGroupBox("Projekt wideo")
+    @staticmethod
+    def _scroll(page: QWidget) -> QScrollArea:
+        page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        page.setStyleSheet("QWidget#scrollPage { background: transparent; }")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
+
+    def _build_competition_step(self):
+        page, layout = self._page(
+            "Zawody",
+            "Skąd brać nagrania, gdzie zapisać gotowe filmy i jak nazywają się zawody "
+            "(z tego powstają nazwy plików i tytuły na YouTube).",
+        )
+        paths = QGroupBox("Nagrania")
         paths_layout = QVBoxLayout(paths)
-        paths_layout.setSpacing(12)
+        paths_layout.setSpacing(10)
         self._add_path_field(paths_layout, "folder_wejsciowy", "Nagrania źródłowe", "dir")
         self._add_path_field(paths_layout, "folder_wyjsciowy", "Gotowe filmy", "dir")
+        layout.addWidget(paths)
+
+        details = QGroupBox("Opis zawodów")
+        details_layout = QVBoxLayout(details)
+        self.competition_form = CompetitionForm()
+        self.competition_form.changed.connect(self._on_competition_form_changed)
+        details_layout.addWidget(self.competition_form)
+        self.description_toggle = QToolButton()
+        self.description_toggle.setCheckable(True)
+        self.description_toggle.setText("Pokaż pełny tekst opisu")
+        self.description_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._set_icon(self.description_toggle, "list")
+        details_layout.addWidget(self.description_toggle)
+        layout.addWidget(details)
+
+        self.description_editor_group = self._create_editor("plik_opisu_zawodow", "Pełny tekst opisu zawodów")
+        hint = QLabel(
+            "Pola formularza są zapisywane na początku tego pliku; reszta tekstu "
+            "(np. wklejony opis z Practiscore) zostaje bez zmian."
+        )
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        self.description_editor_group.layout().insertWidget(0, hint)
+        self.description_editor_group.setVisible(False)
+        self.description_toggle.toggled.connect(self._toggle_description_editor)
+        layout.addWidget(self.description_editor_group)
+        layout.addStretch(1)
+        return self._scroll(page)
+
+    def _toggle_description_editor(self, visible: bool):
+        self.description_editor_group.setVisible(visible)
+        self.description_toggle.setText("Ukryj pełny tekst opisu" if visible else "Pokaż pełny tekst opisu")
+
+    def _build_results_step(self):
+        page, layout = self._page(
+            "Wyniki",
+            "Wklej wyniki z Practiscore, ECM albo wpisz czasy z treningu (tor;czas). "
+            "Format rozpozna się sam, a tabela poniżej pokaże, co zostało odczytane.",
+        )
+        results = self._create_editor("plik_z_wynikami", "Wyniki zawodów")
+        results.layout().insertLayout(0, self._build_results_mode_choice())
+        layout.addWidget(results, 1)
+        preview_group = QGroupBox("Odczytane wyniki")
+        preview_layout = QVBoxLayout(preview_group)
+        self.results_preview = ResultsPreview()
+        preview_layout.addWidget(self.results_preview)
+        layout.addWidget(preview_group, 1)
+        self._results_timer = QTimer(self)
+        self._results_timer.setSingleShot(True)
+        self._results_timer.setInterval(RESULTS_PREVIEW_DELAY_MS)
+        self._results_timer.timeout.connect(self._update_results_preview)
+        self.editors["plik_z_wynikami"].textChanged.connect(self._results_timer.start)
+        return self._scroll(page)
+
+    def _build_publish_step(self):
+        page = QWidget()
+        page.setObjectName("scrollPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(28, 22, 28, 22)
+        layout.setSpacing(12)
+        title = QLabel("Publikacja")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Wyślij sprawdzone filmy na YouTube albo przygotuj szkice postów w Buffer. "
+                          "Montaż nigdy nie publikuje niczego sam.")
+        subtitle.setObjectName("muted")
+        subtitle.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        self.publish_tabs = QTabWidget()
+        self.publish_tabs.addTab(self._build_youtube_tab(), "YouTube")
+        self.tab_buffer = self._build_buffer_tab()
+        self.publish_tabs.addTab(self.tab_buffer, "Buffer i Cloudflare")
+        layout.addWidget(self.publish_tabs, 1)
+        return page
+
+    def _build_main_tab(self):
+        page, layout = self._page(
+            "Montaż",
+            "Sprawdź plan: który plik jest którym torem, czy jest wynik i gdzie zaczyna się przebieg. "
+            "Numer toru i orientację zmienisz bezpośrednio w tabeli.",
+        )
         self.subtitles_check = QCheckBox("Czy dodać wyniki")
         self.subtitles_check.setToolTip(
             "Steruje tylko planszą z wynikami na dole filmu."
@@ -478,8 +611,16 @@ class MainWindow(QMainWindow):
             str(self.settings.value("dodaj_napisy", "false")).lower() == "true"
         )
         self.subtitles_check.toggled.connect(self._remember_subtitles)
-        layout.addWidget(paths)
         layout.addWidget(self._build_assembly_mode())
+
+        plan_group = QGroupBox("Plan montażu")
+        plan_layout = QVBoxLayout(plan_group)
+        self.plan_table = PlanTable(lambda name, role: icon(name, self.colors[role]))
+        self.plan_table.mapping_changed.connect(self._on_mapping_changed)
+        self.plan_table.refresh_requested.connect(self._refresh_plan)
+        self.plan_table.detect_timer_requested.connect(self._detect_timers)
+        plan_layout.addWidget(self.plan_table)
+        layout.addWidget(plan_group, 2)
 
         bar = QHBoxLayout()
         status_column = QVBoxLayout()
@@ -537,11 +678,12 @@ class MainWindow(QMainWindow):
         self.log_view.setPlaceholderText("Tutaj pojawią się postęp montażu i komunikaty aplikacji.")
         log_layout.addWidget(self.log_view)
         layout.addWidget(self.log_group, 1)
+        self.log_view.setMinimumHeight(160)
         self.log_spacer = QWidget()
-        layout.addWidget(self.log_spacer, 1)
+        layout.addWidget(self.log_spacer, 0)
         self.log_toggle.setChecked(str(self.settings.value("log_visible", "false")).lower() == "true")
         self._toggle_log(self.log_toggle.isChecked())
-        return page
+        return self._scroll(page)
 
     def _toggle_log(self, visible: bool):
         self.log_group.setVisible(visible)
@@ -565,6 +707,10 @@ class MainWindow(QMainWindow):
         app.setStyleSheet(build_stylesheet(self.colors, monospace_family()))
         for widget, name, role in self._icon_widgets:
             widget.setIcon(icon(name, self.colors[role]))
+        if hasattr(self, "tabs"):
+            self.tabs.refresh_icons()
+        if hasattr(self, "plan_table"):
+            self.plan_table.set_colors(self.colors)
         if hasattr(self, "help_browser"):
             self._render_help()
 
@@ -635,8 +781,9 @@ class MainWindow(QMainWindow):
         options.addWidget(self.overwrite_check)
         options.addStretch(1)
         layout.addLayout(options)
+        layout.addLayout(self._build_orientation_choice())
 
-        hint = QLabel("Montaż niczego nie publikuje. Sprawdź filmy, a potem wyślij je w zakładkach YouTube i Buffer.")
+        hint = QLabel("Montaż niczego nie publikuje. Sprawdź filmy, a potem wyślij je w kroku Publikacja.")
         hint.setObjectName("muted")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -655,15 +802,13 @@ class MainWindow(QMainWindow):
             self.start_button.setText(self.start_button_text)
             self._icon_widgets = [entry for entry in self._icon_widgets if entry[0] is not self.start_button]
             self._set_icon(self.start_button, "scissors" if trim_only else "play", "on_accent")
+            self._update_start_button()
 
     def _build_config_tab(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(10)
-        description = QLabel("Folder z podkładami oraz treści wykorzystywane przy generowaniu filmów.")
-        description.setObjectName("muted")
-        layout.addWidget(description)
+        page, layout = self._page(
+            "Ustawienia",
+            "Muzyka, logo, teksty wideo, klucze usług i wygląd aplikacji.",
+        )
 
         music = QGroupBox("Biblioteka muzyki")
         music_layout = QVBoxLayout(music)
@@ -688,19 +833,19 @@ class MainWindow(QMainWindow):
         self.video_texts_check.toggled.connect(self._remember_video_texts)
         video_texts_editor.layout().insertWidget(0, self.video_texts_check)
         layout.addWidget(video_texts_editor)
-        layout.addWidget(self._create_editor("plik_opisu_zawodow", "Opis zawodów"))
+        track_mapping = self._create_editor("plik_z_torami", "Mapowanie torów (zaawansowane)")
+        mapping_hint = QLabel(
+            "Ten plik zmienia się sam, gdy edytujesz tory w tabeli planu (krok Montaż). "
+            "Każda linia to numer toru dla kolejnego nagrania (alfabetycznie), opcjonalnie z ;H lub ;V."
+        )
+        mapping_hint.setObjectName("muted")
+        mapping_hint.setWordWrap(True)
+        track_mapping.layout().insertWidget(0, mapping_hint)
+        layout.addWidget(track_mapping)
         layout.addWidget(self._build_api_keys())
         layout.addWidget(self._build_appearance())
         layout.addStretch(1)
-        page.setObjectName("scrollPage")
-        page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        page.setStyleSheet("QWidget#scrollPage { background: transparent; }")
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setWidget(page)
-        return scroll
+        return self._scroll(page)
 
     def _build_appearance(self):
         group = QGroupBox("Wygląd")
@@ -786,7 +931,7 @@ class MainWindow(QMainWindow):
 
         group = QGroupBox("Folder z filmami do wysłania")
         group_layout = QVBoxLayout(group)
-        self.yt_same_folder = QCheckBox("Taki sam jak „Gotowe filmy” (zakładka Główna)")
+        self.yt_same_folder = QCheckBox("Taki sam jak „Gotowe filmy” (krok Zawody)")
         self.yt_same_folder.setChecked(
             str(self.settings.value("yt_ten_sam_folder", "true")).lower() == "true"
         )
@@ -1227,7 +1372,7 @@ class MainWindow(QMainWindow):
 
         token = saved_buffer_api_key()
         if not token:
-            QMessageBox.warning(self, "Buffer", "Brak klucza Buffer API. Wpisz go w zakładce Konfiguracja → Klucze usług.")
+            QMessageBox.warning(self, "Buffer", "Brak klucza Buffer API. Wpisz go w Ustawieniach → Klucze usług.")
             return
         platforms = self._buffer_platforms()
         if not platforms:
@@ -1518,24 +1663,7 @@ class MainWindow(QMainWindow):
         self.test_button.setText("Test systemu")
         if self._test_automatic and has_problems:
             self.tabs.setCurrentWidget(self.tab_help)
-            self.status.setText("Wykryto braki w systemie — szczegóły w zakładce Pomoc")
-
-    def _build_competition_tab(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(10)
-        description = QLabel("Edytuj dane zawodów bezpośrednio w plikach tekstowych używanych przez montaż.")
-        description.setObjectName("muted")
-        layout.addWidget(description)
-        track_mapping = self._create_editor("plik_z_torami", "Mapowanie torów")
-        track_mapping.layout().insertLayout(1, self._build_orientation_choice())
-        layout.addWidget(track_mapping)
-        results = self._create_editor("plik_z_wynikami", "Wyniki zawodów")
-        results.layout().insertLayout(0, self._build_results_mode_choice())
-        layout.addWidget(results)
-        layout.addStretch(1)
-        return page
+            self.status.setText("Wykryto braki w systemie — szczegóły w Pomocy")
 
     def _build_results_mode_choice(self):
         row = QHBoxLayout()
@@ -1640,6 +1768,11 @@ class MainWindow(QMainWindow):
             if self.tabs.widget(index).isAncestorOf(field):
                 self.tabs.setCurrentIndex(index)
                 break
+        for index in range(self.publish_tabs.count()):
+            if self.publish_tabs.widget(index).isAncestorOf(field):
+                self.publish_tabs.setCurrentIndex(index)
+        if key == "plik_opisu_zawodow":
+            self.description_toggle.setChecked(True)
         field.setFocus()
         self.status.setText("Popraw zaznaczone pole")
         self.status_detail.setText(message)
@@ -1735,6 +1868,266 @@ class MainWindow(QMainWindow):
 
     def _remember_path(self, key: str):
         self.settings.setValue(key, self.fields[key].text().strip())
+        if key == "folder_wejsciowy":
+            self._timer_results.clear()
+        self._schedule_plan_refresh()
+
+    # --- kroki, plan montażu, wyniki i opis zawodów ---
+    def _connect_plan_triggers(self):
+        for checkbox in (self.subtitles_check, self.overwrite_check, self.mode_trim_only, self.radio_horizontal):
+            checkbox.toggled.connect(self._schedule_plan_refresh)
+        self.results_mode_group.buttonToggled.connect(self._results_mode_toggled)
+        self.fields["folder_wejsciowy"].textChanged.connect(lambda _text: self._timer_results.clear())
+
+    def _schedule_plan_refresh(self, *_):
+        self._plan_timer.start()
+
+    def _on_step_changed(self, index: int):
+        if index == STEP_ASSEMBLY:
+            self._refresh_plan()
+
+    def _on_editor_file_changed(self, key: str):
+        if key == "plik_opisu_zawodow":
+            self._sync_form_from_description()
+        elif key == "plik_z_wynikami":
+            self._update_results_preview()
+        if key in {"plik_opisu_zawodow", "plik_z_wynikami", "plik_z_torami"}:
+            self._schedule_plan_refresh()
+
+    def _description_path(self) -> Path:
+        return Path(self.fields["plik_opisu_zawodow"].text().strip())
+
+    def _sync_form_from_description(self):
+        """Wypełnia formularz danymi z pliku opisu (obsługuje też wklejony opis z Practiscore)."""
+        if self._syncing_description:
+            return
+        path = self._description_path()
+        try:
+            data = read_match_data(path)
+        except (OSError, ValueError) as error:
+            self.competition_form.set_title_preview(f"Tytuł filmu: nie da się go utworzyć — {error}")
+            self._refresh_step_status()
+            return
+        self.competition_form.set_data(data.name, data.match_date, data.location, data.match_type, data.level)
+        self._update_title_preview()
+        self._refresh_step_status()
+
+    def _update_title_preview(self):
+        try:
+            title = generate_title("Gotowe_Stage_1.mp4", self._description_path())
+        except (OSError, ValueError) as error:
+            self.competition_form.set_title_preview(f"Tytuł filmu: nie da się go utworzyć — {error}")
+            return
+        self.competition_form.set_title_preview(f"Przykładowy tytuł i nazwa pliku: {title}")
+
+    def _on_competition_form_changed(self, fields: dict):
+        """Pola formularza trafiają na początek pliku opisu; reszta tekstu zostaje."""
+        if not fields.get("name"):
+            self.competition_form.set_title_preview("Wpisz nazwę zawodów.")
+            return
+        editor = self.editors["plik_opisu_zawodow"]
+        self._syncing_description = True
+        try:
+            editor.setPlainText(apply_match_fields(editor.toPlainText(), fields))
+            self._autosave("plik_opisu_zawodow")
+        finally:
+            self._syncing_description = False
+        self._update_title_preview()
+
+    def _results_mode_toggled(self, _button, checked: bool):
+        if checked:
+            self._update_results_preview(auto_detect=False)
+            self._schedule_plan_refresh()
+
+    def _update_results_preview(self, auto_detect: bool = True):
+        text = self.editors["plik_z_wynikami"].toPlainText()
+        mode = self._selected_results_mode()
+        results = parse_results(text, mode)
+        note = ""
+        if auto_detect and not results and text.strip():
+            detected, detected_results = detect_results_mode(text, mode)
+            if detected_results:
+                self.results_mode_buttons[detected].setChecked(True)  # wywoła ponownie podgląd
+                mode, results = detected, detected_results
+                note = " — format rozpoznany automatycznie"
+        self._results_count = len(results)
+        label = RESULTS_MODE_LABELS.get(mode, mode)
+        if results:
+            summary = f"Odczytano torów: {len(results)} (format: {label}{note})."
+        elif text.strip():
+            summary = (f"Nie odczytano żadnego toru w formacie {label}. Sprawdź, czy wklejono całą tabelę "
+                       "wyników, albo wpisz czasy jako „tor;czas”, np. 3;12,45.")
+        else:
+            summary = "Wklej wyniki powyżej."
+        self.results_preview.show_results(results, summary)
+        self._refresh_step_status()
+
+    def _mapping_orientations(self) -> list:
+        path = Path(self.fields["plik_z_torami"].text().strip())
+        try:
+            lines = [line.strip() for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+        except (OSError, UnicodeError):
+            return []
+        orientations = []
+        for line in lines:
+            _, _, orientation = line.partition(";")
+            orientation = orientation.strip().upper()
+            orientations.append(orientation if orientation in ("H", "V") else "")
+        return orientations
+
+    def _refresh_plan(self):
+        self._plan_timer.stop()
+        self._current_plan = []
+        if plan_assembly is None:
+            self.plan_table.show_message(f"Plan niedostępny — brakuje składników montażu ({ASSEMBLY_ERROR}).")
+            self._refresh_step_status()
+            return
+        config = self._get_config()
+        if not config.folder_wejsciowy.is_dir():
+            self.plan_table.show_message("Wskaż folder z nagraniami w kroku „Zawody”.")
+            self._refresh_step_status()
+            return
+        try:
+            plan = plan_assembly(config)
+        except Exception as error:
+            self.plan_table.show_message(f"Nie udało się przygotować planu: {error}")
+            self._refresh_step_status()
+            return
+        orientations = self._mapping_orientations()
+        rows = []
+        for index, item in enumerate(plan):
+            if item.file_name in self._timer_results:
+                start = self._timer_results[item.file_name]
+                timer = TIMER_NOT_FOUND if start is None else start
+            else:
+                timer = TIMER_NOT_CHECKED
+            rows.append(PlanRow(
+                file_name=item.file_name,
+                track=str(item.track),
+                orientation=orientations[index] if index < len(orientations) else "",
+                run_time=item.result["czas"] if item.result else None,
+                timer=timer,
+                action=item.action,
+                output_name=item.output_name,
+            ))
+        self._current_plan = plan
+        if rows:
+            self.plan_table.set_rows(rows, config.domyslna_orientacja)
+        else:
+            self.plan_table.show_message("W folderze z nagraniami nie ma plików MP4 ani MOV.")
+        self._update_start_button()
+        self._refresh_step_status()
+
+    def _update_start_button(self):
+        base = self.start_button_text
+        plan = getattr(self, "_current_plan", [])
+        count = sum(1 for item in plan if item.action == "render")
+        self.start_button.setText(f"{base} ({count})" if count else base)
+
+    def _on_mapping_changed(self, mapping: list):
+        """Zmiany torów z tabeli zapisuje do mapowanie_torow.txt."""
+        field = self.fields["plik_z_torami"]
+        if not field.text().strip():
+            field.setText(str(PLIK_Z_TORAMI))
+        path = Path(field.text().strip())
+        lines = [f"{track};{orientation}" if orientation else str(track) for track, orientation in mapping]
+        try:
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as error:
+            self.status_detail.setText(f"Nie udało się zapisać {path.name}: {error}")
+            return
+        self._remember_path("plik_z_torami")
+        self._load_file("plik_z_torami", False)
+        self.status_detail.setText(f"Zapisano kolejność torów w {path.name}.")
+        self._refresh_plan()
+
+    def _detect_timers(self):
+        if self.timer_thread is not None:
+            if self.timer_cancel_event is not None:
+                self.timer_cancel_event.set()
+            return
+        if plan_assembly is None:
+            return
+        config = self._get_config()
+        if not config.folder_wejsciowy.is_dir():
+            self._show_path_error("folder_wejsciowy", "Najpierw wskaż folder z nagraniami.")
+            return
+        self.timer_cancel_event = Event()
+        self.timer_thread = QThread(self)
+        self.timer_worker = TimerDetectWorker(config, self.timer_cancel_event)
+        self.timer_worker.moveToThread(self.timer_thread)
+        self.timer_thread.started.connect(self.timer_worker.run)
+        self.timer_worker.finished.connect(self._on_timers_detected)
+        self.timer_worker.finished.connect(self.timer_thread.quit)
+        self.timer_thread.finished.connect(self.timer_worker.deleteLater)
+        self.timer_thread.finished.connect(self.timer_thread.deleteLater)
+        self.timer_thread.finished.connect(self._release_timer_thread)
+        self.plan_table.set_detecting(True)
+        self.start_button.setEnabled(False)
+        self.status.setText("Analiza dźwięku nagrań…")
+        self.status_detail.setText("Szukam sygnału timera w każdym nagraniu. To może chwilę potrwać.")
+        self.timer_thread.start()
+
+    def _on_timers_detected(self, results: dict, error: str):
+        if error == "cancelled":
+            self.status.setText("Analizę przerwano")
+            self.status_detail.setText("")
+        elif error:
+            self.status.setText("Analiza dźwięku nie powiodła się")
+            self.status_detail.setText(error)
+        else:
+            self._timer_results.update(results)
+            found = sum(1 for start in results.values() if start is not None)
+            self.status.setText("Analiza zakończona")
+            self.status_detail.setText(f"Wykryto start timera w {found} z {len(results)} nagrań.")
+        self._refresh_plan()
+
+    def _release_timer_thread(self):
+        self.timer_thread = None
+        self.timer_worker = None
+        self.timer_cancel_event = None
+        self.plan_table.set_detecting(False)
+        if self.worker_thread is None:
+            self.start_button.setEnabled(True)
+
+    def _refresh_step_status(self):
+        nav = self.tabs
+        # 1. Zawody: nagrania i opis
+        source = Path(self.fields["folder_wejsciowy"].text().strip())
+        try:
+            has_videos = source.is_dir() and any(p.suffix.lower() in VIDEO_SUFFIXES for p in source.iterdir())
+        except OSError:
+            has_videos = False
+        try:
+            read_match_data(self._description_path())
+            description_ok = True
+        except (OSError, ValueError):
+            description_ok = False
+        if has_videos and description_ok:
+            nav.set_status(STEP_COMPETITION, STATUS_OK, "Nagrania i opis zawodów są gotowe.")
+        else:
+            problems = [text for ok, text in ((has_videos, "brak nagrań w folderze"),
+                                             (description_ok, "opis zawodów bez nazwy lub daty")) if not ok]
+            nav.set_status(STEP_COMPETITION, STATUS_WARNING, "Do poprawy: " + ", ".join(problems) + ".")
+        # 2. Wyniki
+        results_needed = self.subtitles_check.isChecked() and not self.mode_trim_only.isChecked()
+        if self._results_count:
+            nav.set_status(STEP_RESULTS, STATUS_OK, f"Odczytano torów: {self._results_count}.")
+        elif results_needed:
+            nav.set_status(STEP_RESULTS, STATUS_WARNING, "Brak odczytanych wyników, a plansza wyników jest włączona.")
+        else:
+            nav.set_status(STEP_RESULTS, None, "Wyniki są opcjonalne (plansza wyników wyłączona).")
+        # 3. Montaż
+        plan = getattr(self, "_current_plan", [])
+        render = sum(1 for item in plan if item.action == "render")
+        if not plan:
+            nav.set_status(STEP_ASSEMBLY, None, "")
+        elif render:
+            nav.set_status(STEP_ASSEMBLY, STATUS_OK, f"Do montażu: {render} z {len(plan)}.")
+        elif all(item.action == "skip_exists" for item in plan):
+            nav.set_status(STEP_ASSEMBLY, STATUS_OK, "Wszystkie filmy są już zmontowane.")
+        else:
+            nav.set_status(STEP_ASSEMBLY, STATUS_WARNING, "Żadne nagranie nie zostanie zmontowane — sprawdź plan.")
 
     def _mark_dirty(self, key: str):
         self._dirty_editors.add(key)
@@ -1781,6 +2174,7 @@ class MainWindow(QMainWindow):
         self._dirty_editors.discard(key)
         self.editor_status[key].setText(f"Wczytano: {path.name}")
         self.editor_status[key].setToolTip(str(path))
+        self._on_editor_file_changed(key)
         return True
 
     def _save_file(self, key: str, show_confirmation: bool = False, checked: bool = False):
@@ -1800,13 +2194,17 @@ class MainWindow(QMainWindow):
         self.editor_status[key].setToolTip(str(path))
         if show_confirmation:
             self.status.setText(f"Zapisano plik: {path.name}")
+        self._on_editor_file_changed(key)
         return True
 
     def _tab_for_editor(self, key: str):
         if key == "buffer_video_list":
-            return self.tab_buffer
-        if key in {"plik_z_tekstami", "plik_opisu_zawodow"}:
+            self.publish_tabs.setCurrentWidget(self.tab_buffer)
+            return self.tab_publish
+        if key in {"plik_z_tekstami", "plik_z_torami"}:
             return self.tab_config
+        if key == "plik_z_wynikami":
+            return self.tab_results
         return self.tab_competition
 
     def _save_dirty_editors(self):
@@ -1840,7 +2238,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Brak wymaganych składników",
                 "Nie można uruchomić montażu, bo nie załadowano modułu montażu:\n"
-                f"{ASSEMBLY_ERROR}\n\nSprawdź zakładkę Pomoc i doinstaluj brakujące elementy.",
+                f"{ASSEMBLY_ERROR}\n\nSprawdź krok Pomoc i doinstaluj brakujące elementy.",
             )
             self.tabs.setCurrentWidget(self.tab_help)
             self._run_system_test()
@@ -1981,7 +2379,7 @@ class MainWindow(QMainWindow):
         self.status.setText(message)
         if success:
             self.progress_bar.setValue(self.progress_bar.maximum())
-            self.status_detail.setText("Sprawdź filmy w folderze Gotowe, a potem opublikuj je w zakładce YouTube lub Buffer.")
+            self.status_detail.setText("Sprawdź filmy w folderze Gotowe, a potem opublikuj je w kroku Publikacja.")
             self._notify("Montaż zakończony", message)
         elif "przerwano" in message.lower():
             self.status_detail.setText("Wcześniej gotowe filmy zostały zachowane.")
@@ -1996,11 +2394,17 @@ class MainWindow(QMainWindow):
         self.worker_thread = None
         if self.job_complete:
             self.start_button.setEnabled(True)
+        self._refresh_plan()
 
     def closeEvent(self, event):
         if self.test_thread is not None:
             self.test_thread.quit()
             self.test_thread.wait(5000)
+        if self.timer_thread is not None:
+            if self.timer_cancel_event is not None:
+                self.timer_cancel_event.set()
+            self.timer_thread.quit()
+            self.timer_thread.wait(10000)
         if self.worker_thread and self.worker_thread.isRunning():
             QMessageBox.information(
                 self,

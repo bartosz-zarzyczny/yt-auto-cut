@@ -19,6 +19,17 @@ ICON_PATHS = {
     "film": '<rect x="3" y="4" width="18" height="16" rx="2"/>'
             '<path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
     "check": '<path d="M5 12l5 5L20 7"/>',
+    "circle_check": '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+    "alert": '<path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
+    "trophy": '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/>'
+              '<path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3"/>',
+    "table": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/>',
+    "settings": '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1'
+                'M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+    "help": '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4"/><path d="M12 17h.01"/>',
+    "arrow_up": '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+    "arrow_down": '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+    "wave": '<path d="M2 12h2l2-6 3 12 3-9 2 6 2-3h6"/>',
 }
 
 SVG_TEMPLATE = (
