@@ -111,6 +111,7 @@ class PublishOptions:
 from results_parser import (  # noqa: E402,F401 — ponowny eksport dla zgodności
     CZYTNIKI_WYNIKOW,
     czytaj_wyniki_z_pliku,
+    format_result_plate,
 )
 
 
@@ -333,8 +334,7 @@ def uruchom_automatyzacje(
                 # --- NAPISY ---
                 warstwy_napisow = []
                 if konfiguracja.dodaj_napisy and dane:
-                    tekst_wyswietlany = (f"STAGE {nr_toru} | Miejsce: {dane['miejsce']} ({dane['procent']})\n"
-                                         f"Czas: {dane['czas']}s | HF: {dane['hf']} | Pkt: {dane['punkty']}")
+                    tekst_wyswietlany = format_result_plate(nr_toru, dane)
 
                     napis = text_clip(
                         tekst_wyswietlany, nowy_czas_trwania, font_path=choose_font(), font_size=55,

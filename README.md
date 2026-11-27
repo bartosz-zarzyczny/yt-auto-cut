@@ -1,6 +1,6 @@
 # Automatyzacja Montażu Wideo IPSC 🔫🎬
 
-Ten skrypt w Pythonie automatyzuje proces montażu nagrań wideo z zawodów IPSC. Przetwarza pliki wideo w całej ich długości (bez przycinania), zapętla i podkłada muzykę z efektem fade-out, zmienia format na pionowy 1080x1920 i dodaje planszę z Twoimi wynikami (czas, miejsce, punkty, Hit Factor).
+Ten program w Pythonie automatyzuje montaż nagrań wideo z zawodów IPSC — w aplikacji okienkowej (Windows i macOS) albo z terminala. Sam znajduje w dźwięku sygnał timera i przycina każde nagranie do przebiegu (start timera i czas z wyników), podkłada zapętloną muzykę z efektem fade-out, zmienia format na pionowy 1080×1920 lub poziomy 1920×1080 i dodaje planszę z Twoimi wynikami (czas, a gdy są w wynikach — miejsce, punkty i Hit Factor), teksty wideo i logo. Tryb **Tylko przycięcie** szybko przycina nagrania bez żadnych dodatków. Gotowe filmy możesz najpierw obejrzeć, a potem opublikować na YouTube lub przez Buffer — montaż nigdy nie publikuje niczego sam.
 
 Jeśli komputer ma obsługiwaną kartę graficzną (NVIDIA, AMD lub Intel), renderowanie korzysta ze sprzętowego kodera i jest bardzo szybkie. Bez niej montaż nadal działa, ale na procesorze (wolniej).
 
@@ -178,7 +178,7 @@ Plik zawiera **skopiowaną stronę z wynikami zawodnika z PractiScore** (wyniki 
 - Numer toru z `mapowanie_torow.txt` musi mieć odpowiadający wiersz `Stage N` w wynikach. Jeśli go brakuje, nagranie jest **pomijane** z komunikatem „brak wyników dla toru N”, a w aplikacji desktopowej ma status „pominięto”.
 - Jeśli pominięto wszystkie nagrania, aplikacja informuje, że wyniki nie zawierają przypisanych torów — sprawdź wtedy tabelę planu w kroku **Montaż** i odczytane wyniki w kroku **Wyniki**.
 - Plik wczytywany jest w UTF-8; w aplikacji desktopowej możesz go wkleić i zapisać bezpośrednio w kroku **Wyniki** — tabela pod edytorem od razu pokaże odczytane tory.
-- **Format wyników (zakładka Zawody):** nad wyborem pliku wybierz jedną z opcji — **Practiscore** (domyślnie, wyniki wklejone ze strony PractiScore), **ECM** (wiersze `Stage 01  4.3290  40  8 0 0 0 0 0  9.24`, czas z ostatniej kolumny) lub **Trening** (ręcznie wpisane wiersze `numer toru; czas`, np. `1; 23` lub `3;20,81`). Wybór jest zapamiętywany.
+- **Format wyników (krok Wyniki):** nad wyborem pliku wybierz jedną z opcji — **Practiscore** (domyślnie, wyniki wklejone ze strony PractiScore), **ECM** (wiersze `Stage 01  4.3290  40  8 0 0 0 0 0  9.24`, czas z ostatniej kolumny) lub **Trening** (ręcznie wpisane wiersze `numer toru; czas`, np. `1; 23` lub `3;20,81`). Wybór jest zapamiętywany. Plansza na filmie pokazuje tylko pola, które są w wynikach: przy Treningu jedną linię `STAGE 3 | Czas: 20.81s`, przy ECM czas, HF i punkty (bez miejsca), a przy Practiscore komplet.
 
 3. **Dodatkowe teksty u góry wideo (`teksty_wideo.txt`):**
    Checkbox **Czy dodać wyniki** steruje wyłącznie planszą z wynikami na dole filmu. Osobny checkbox **Czy dodać teksty wideo** w **Ustawieniach** (domyślnie zaznaczony, wybór jest zapamiętywany) steruje tekstami z `teksty_wideo.txt`, niezależnie od wyników. Pusty plik (lub plik bez wpisów w nawiasach kwadratowych) nie dodaje tekstów. Czas przebiegu z `wyniki.txt` nadal służy do przycięcia filmu, jeśli jest dostępny.

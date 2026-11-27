@@ -59,6 +59,17 @@ class MatchFieldsTests(unittest.TestCase):
             data = read_match_data(path)
         self.assertEqual((data.name, data.match_date, data.location), ("Nowa", date(2026, 12, 1), "Kraków"))
 
+    def test_result_plate_shows_only_available_fields(self):
+        from results_parser import format_result_plate
+
+        empty = {"miejsce": "", "procent": "", "punkty": "", "hf": ""}
+        self.assertEqual(format_result_plate(3, {**empty, "czas": 12.45}), "STAGE 3 | Czas: 12.45s")
+        self.assertEqual(format_result_plate(3, {**empty, "punkty": "76", "hf": "6.1", "czas": 12.45}),
+                         "STAGE 3\nCzas: 12.45s | HF: 6.1 | Pkt: 76")
+        full = {"miejsce": "5", "procent": "87.21%", "punkty": "76", "hf": "6.1", "czas": 12.45}
+        self.assertEqual(format_result_plate(3, full),
+                         "STAGE 3 | Miejsce: 5 (87.21%)\nCzas: 12.45s | HF: 6.1 | Pkt: 76")
+
     def test_results_mode_detection(self):
         self.assertEqual(detect_results_mode("1;9,00\n2;11\n")[0], "trening")
         mode, results = detect_results_mode(PRACTISCORE_PASTE, "trening")

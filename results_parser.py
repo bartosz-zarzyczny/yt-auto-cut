@@ -92,6 +92,24 @@ def czytaj_wyniki_z_pliku(sciezka_do_pliku, tryb=TRYB_WYNIKOW_PRACTISCORE):
     return czytnik(tekst)
 
 
+def format_result_plate(track, data: dict) -> str:
+    """Tekst planszy wyników: tylko pola, które są w wynikach (Trening ma sam czas, ECM nie ma miejsca)."""
+    header = [f"STAGE {track}"]
+    if data.get("miejsce"):
+        place = f"Miejsce: {data['miejsce']}"
+        if data.get("procent"):
+            place += f" ({data['procent']})"
+        header.append(place)
+    details = [f"Czas: {data['czas']}s"]
+    if data.get("hf"):
+        details.append(f"HF: {data['hf']}")
+    if data.get("punkty"):
+        details.append(f"Pkt: {data['punkty']}")
+    if len(header) == 1 and len(details) == 1:
+        return f"{header[0]} | {details[0]}"
+    return " | ".join(header) + "\n" + " | ".join(details)
+
+
 def parse_results(text: str, mode: str) -> Dict[str, dict]:
     """Wyniki z tekstu w danym formacie: {numer_toru: {miejsce, procent, punkty, hf, czas}}."""
     reader = CZYTNIKI_WYNIKOW.get(mode)
