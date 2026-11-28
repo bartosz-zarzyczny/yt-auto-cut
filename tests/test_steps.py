@@ -13,7 +13,7 @@ import desktop_app
 from generate_names import apply_match_fields, read_match_data
 from results_parser import detect_results_mode
 from ui.navigation import STATUS_OK, STATUS_WARNING
-from ui.plan_table import TIMER_NOT_CHECKED, TIMER_NOT_FOUND, PlanRow, PlanTable
+from ui.plan_table import TIMER_NOT_CHECKED, TIMER_NOT_FOUND, PlanRow, PlanTable, parse_track_order
 from ui_icons import icon
 
 PRACTISCORE_PASTE = "Stage 3  Tor 3  5  87.21%  60.0  76  6.1234  12.45\n"
@@ -115,6 +115,37 @@ class PlanTableTests(unittest.TestCase):
         self.assertEqual(table.table.item(0, 1).text(), "1")
         table.table.item(0, 1).setText("7")
         self.assertEqual(emitted[-1], [("2", "H"), ("7", "")])
+
+    def test_order_field_shows_order_by_file_name(self):
+        table = self._table()
+        self.assertEqual(table.order_edit.text(), "2,1")
+
+    def test_order_field_sets_all_tracks_and_keeps_orientation(self):
+        table = self._table()
+        emitted = []
+        table.mapping_changed.connect(emitted.append)
+        table.order_edit.setText("5 6")
+        table.apply_order()
+        self.assertEqual(emitted[-1], [("5", "H"), ("6", "")])
+        self.assertEqual(table.order_edit.text(), "5,6")
+        self.assertTrue(table.order_error.isHidden())
+
+    def test_order_field_rejects_wrong_count_and_duplicates(self):
+        table = self._table()
+        emitted = []
+        table.mapping_changed.connect(emitted.append)
+        table.order_edit.setText("3,3")
+        table.apply_order()
+        self.assertEqual(emitted, [])
+        self.assertIn("powtarzają: 3", table.order_error.text())
+        self.assertEqual(table.mapping(), [("2", "H"), ("1", "")])
+
+    def test_parse_track_order(self):
+        self.assertEqual(parse_track_order("5,6,7,8,1,2,3,4", 8), (["5", "6", "7", "8", "1", "2", "3", "4"], ""))
+        self.assertEqual(parse_track_order(" 05; 2 ", 2), (["5", "2"], ""))
+        self.assertIn("nagrań jest 3", parse_track_order("1,2", 3)[1])
+        self.assertIn("x", parse_track_order("1,x", 2)[1])
+        self.assertIn("0", parse_track_order("1,0", 2)[1])
 
 
 class StepWindowTests(unittest.TestCase):

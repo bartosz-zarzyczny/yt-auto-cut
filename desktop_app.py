@@ -837,7 +837,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(video_texts_editor)
         track_mapping = self._create_editor("plik_z_torami", "Mapowanie torów (zaawansowane)")
         mapping_hint = QLabel(
-            "Ten plik zmienia się sam, gdy edytujesz tory w tabeli planu (krok Montaż). "
+            "Ten plik zmienia się sam, gdy ustawiasz kolejność torów lub edytujesz tory w kroku Montaż. "
             "Każda linia to numer toru dla kolejnego nagrania (alfabetycznie), opcjonalnie z ;H lub ;V."
         )
         mapping_hint.setObjectName("muted")
@@ -2032,6 +2032,12 @@ class MainWindow(QMainWindow):
         if not field.text().strip():
             field.setText(str(PLIK_Z_TORAMI))
         path = Path(field.text().strip())
+        # Tabela jest źródłem prawdy: niezapisane zmiany w edytorze nie mogą nadpisać jej zmian
+        # przy ponownym wczytaniu pliku (_load_file zapisuje najpierw „brudny” edytor).
+        timer = self._autosave_timers.get("plik_z_torami")
+        if timer is not None:
+            timer.stop()
+        self._dirty_editors.discard("plik_z_torami")
         lines = [f"{track};{orientation}" if orientation else str(track) for track, orientation in mapping]
         try:
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")

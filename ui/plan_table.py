@@ -1,8 +1,10 @@
 """Tabela planu montażu: plik → tor → H/V → wynik → start timera → co się stanie.
 
-Numer toru i orientację zmienia się w tabeli (lub przyciskami W górę / W dół) zamiast w mapowanie_torow.txt."""
+Kolejność torów wpisuje się w jednej linii (np. 5,6,7,8,1,2,3,4), a pojedyncze poprawki robi w tabeli
+(lub przyciskami W górę / W dół) zamiast w mapowanie_torow.txt."""
+import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -25,6 +28,25 @@ ORIENTATION_DEFAULT = ""
 
 TIMER_NOT_CHECKED = "not_checked"
 TIMER_NOT_FOUND = "not_found"
+
+
+def parse_track_order(text: str, count: int) -> Tuple[List[str], str]:
+    """Zamienia "5,6,7,8,1,2,3,4" (przecinki, spacje lub średniki) na listę torów.
+
+    Zwraca (tory, "") albo ([], opis błędu). Torów musi być tyle, ile nagrań, i nie mogą się powtarzać."""
+    parts = [part for part in re.split(r"[\s,;]+", text.strip()) if part]
+    if not parts:
+        return [], "Wpisz numery torów, np. 5,6,7,8,1,2,3,4."
+    invalid = [part for part in parts if not part.isdigit() or int(part) < 1]
+    if invalid:
+        return [], f"To nie są numery torów: {', '.join(invalid)}."
+    tracks = [str(int(part)) for part in parts]
+    if len(tracks) != count:
+        return [], f"Wpisano {len(tracks)} torów, a nagrań jest {count}."
+    duplicates = sorted({track for track in tracks if tracks.count(track) > 1}, key=int)
+    if duplicates:
+        return [], f"Tory się powtarzają: {', '.join(duplicates)}."
+    return tracks, ""
 
 
 @dataclass
@@ -77,6 +99,23 @@ class PlanTable(QWidget):
             tools.addWidget(button)
         layout.addLayout(tools)
 
+        order = QHBoxLayout()
+        order_label = QLabel("Kolejność torów")
+        self.order_edit = QLineEdit()
+        self.order_edit.setPlaceholderText("np. 5,6,7,8,1,2,3,4")
+        self.order_edit.setToolTip(
+            "Numery torów w kolejności nagrań (od najwcześniejszego pliku). Enter lub „Ustaw” zapisuje."
+        )
+        self.order_button = QPushButton("Ustaw")
+        order.addWidget(order_label)
+        order.addWidget(self.order_edit, 1)
+        order.addWidget(self.order_button)
+        layout.addLayout(order)
+        self.order_error = QLabel()
+        self.order_error.setWordWrap(True)
+        self.order_error.hide()
+        layout.addWidget(self.order_error)
+
         self.table = QTableWidget(0, len(HEADERS))
         self.table.setHorizontalHeaderLabels(HEADERS)
         self.table.verticalHeader().setVisible(False)
@@ -97,12 +136,17 @@ class PlanTable(QWidget):
         self.down_button.clicked.connect(lambda: self._move_selected(1))
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
         self.timer_button.clicked.connect(self.detect_timer_requested.emit)
+        self.order_button.clicked.connect(self.apply_order)
+        self.order_edit.returnPressed.connect(self.apply_order)
+        self.order_edit.textEdited.connect(lambda _text: self._show_order_error(""))
         self.refresh_icons()
 
     # --- wygląd ---
     def set_colors(self, colors: Dict[str, str]) -> None:
         self._colors = colors
         self.refresh_icons()
+        if "warning" in self._colors:
+            self.order_error.setStyleSheet(f"color: {self._colors['warning']};")
         if self._rows:
             self.set_rows(self._rows, self._default_orientation)
 
@@ -113,12 +157,14 @@ class PlanTable(QWidget):
 
     def set_detecting(self, running: bool) -> None:
         self.timer_button.setText("Przerwij analizę" if running else "Wykryj start timera")
-        for button in (self.up_button, self.down_button, self.refresh_button):
-            button.setEnabled(not running)
+        for widget in (self.up_button, self.down_button, self.refresh_button, self.order_edit, self.order_button):
+            widget.setEnabled(not running)
 
     def show_message(self, text: str) -> None:
         self._rows = []
         self.table.setRowCount(0)
+        self.order_edit.clear()
+        self._show_order_error("")
         self.summary.setText(text)
 
     # --- dane ---
@@ -139,6 +185,8 @@ class PlanTable(QWidget):
                 self._fill_row(index, row)
         finally:
             self._populating = False
+        if not self.order_edit.hasFocus():
+            self.order_edit.setText(",".join(track for track, _ in self.mapping()))
         for index, row in enumerate(rows):
             if row.file_name == selected_file:
                 self.table.selectRow(index)
@@ -197,6 +245,25 @@ class PlanTable(QWidget):
     def mapping(self) -> List[tuple]:
         """(tor, orientacja) w kolejności nazw plików — tak jak czyta je mapowanie_torow.txt."""
         return [(row.track, row.orientation) for row in sorted(self._rows, key=lambda row: row.file_name)]
+
+    def apply_order(self) -> None:
+        """Ustawia tory wszystkich nagrań naraz z pola „Kolejność torów” (orientacja zostaje przy pliku)."""
+        by_name = sorted(self._rows, key=lambda row: row.file_name)
+        if not by_name:
+            return
+        tracks, error = parse_track_order(self.order_edit.text(), len(by_name))
+        self._show_order_error(error)
+        if error:
+            return
+        for row, track in zip(by_name, tracks):
+            row.track = track
+        self.order_edit.setText(",".join(tracks))
+        self.set_rows(self._rows, self._default_orientation)
+        self.mapping_changed.emit(self.mapping())
+
+    def _show_order_error(self, text: str) -> None:
+        self.order_error.setText(text)
+        self.order_error.setVisible(bool(text))
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         if self._populating or item.column() != COL_TRACK:
